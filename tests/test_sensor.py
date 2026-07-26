@@ -211,6 +211,54 @@ async def test_async_setup_platform(hass: HomeAssistant):
     assert state.state == "2.0"
 
 
+async def test_added_to_hass_after_start_initializes_no_period_sensor(
+    hass: HomeAssistant,
+):
+    """Test no-period sensors initialize when reloaded after HA is running."""
+    await hass.async_start()
+    sensor = AverageSensor(
+        hass,
+        {
+            CONF_NAME: TEST_NAME,
+            CONF_ENTITIES: ["sensor.test_monitored"],
+        },
+    )
+    hass.states.async_set("sensor.test_monitored", "4")
+    sensor.async_schedule_update_ha_state = MagicMock()
+
+    await sensor.async_added_to_hass()
+
+    assert sensor.native_value == 4
+    assert sensor.available_sources == 1
+    assert sensor._on_remove
+
+
+async def test_added_to_hass_registers_removable_state_listener(
+    hass: HomeAssistant,
+):
+    """Test state listeners are removed when a no-period sensor is unloaded."""
+    await hass.async_start()
+    unsubscribe = MagicMock()
+    sensor = AverageSensor(
+        hass,
+        {
+            CONF_NAME: TEST_NAME,
+            CONF_ENTITIES: ["sensor.test_monitored"],
+        },
+    )
+    sensor.async_schedule_update_ha_state = MagicMock()
+
+    with patch(
+        "custom_components.average.sensor.async_track_state_change_event",
+        return_value=unsubscribe,
+    ) as track_state:
+        await sensor.async_added_to_hass()
+
+    track_state.assert_called_once()
+    sensor._call_on_remove_callbacks()
+    unsubscribe.assert_called_once()
+
+
 # pylint: disable=protected-access
 async def test__has_state():
     """Test states checker."""

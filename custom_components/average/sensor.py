@@ -244,12 +244,21 @@ class AverageSensor(SensorEntity):
             if self._has_period:
                 self.async_schedule_update_ha_state(force_refresh=True)
             else:
-                async_track_state_change_event(
-                    self.hass, self.sources, async_sensor_state_listener
+                self.async_on_remove(
+                    async_track_state_change_event(
+                        self.hass, self.sources, async_sensor_state_listener
+                    )
                 )
                 await async_sensor_state_listener(Event("startup"))
 
-        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, async_sensor_startup)
+        if self.hass.is_running:
+            await async_sensor_startup(Event("reload"))
+        else:
+            self.async_on_remove(
+                self.hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_START, async_sensor_startup
+                )
+            )
 
     @staticmethod
     def _has_state(state: str | None) -> bool:
