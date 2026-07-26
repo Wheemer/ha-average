@@ -500,6 +500,37 @@ async def test_update(default_sensor):
         assert ups.call_count == 1
 
 
+async def test_missing_source_is_debug_logged_for_period_sensor(default_sensor, caplog):
+    """Test missing source entities do not log errors for period sensors."""
+    caplog.set_level(logging.DEBUG)
+
+    await default_sensor._async_update_state()
+
+    assert default_sensor.native_value is None
+    assert "Unable to find an entity" in caplog.text
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+async def test_missing_source_is_debug_logged_for_no_period_sensor(
+    hass: HomeAssistant, caplog
+):
+    """Test missing source entities do not log errors for no-period sensors."""
+    caplog.set_level(logging.DEBUG)
+    sensor = AverageSensor(
+        hass,
+        {
+            CONF_NAME: TEST_NAME,
+            CONF_ENTITIES: ["sensor.missing_source"],
+        },
+    )
+
+    sensor._update_state_no_period()
+
+    assert sensor.native_value is None
+    assert "Unable to find an entity" in caplog.text
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
 # pylint: disable=protected-access
 async def test__update_period(default_sensor):
     """Test period updater."""

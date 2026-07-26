@@ -502,7 +502,7 @@ class AverageSensor(SensorEntity):
             state = self.hass.states.get(entity_id)  # type: State
 
             if state is None:
-                _LOGGER.error('Unable to find an entity "%s"', entity_id)
+                _LOGGER.debug('Unable to find an entity "%s"', entity_id)
                 continue
 
             self._init_mode(state)
@@ -619,7 +619,7 @@ class AverageSensor(SensorEntity):
             state = self.hass.states.get(entity_id)  # type: State
 
             if state is None:
-                _LOGGER.error('Unable to find an entity "%s"', entity_id)
+                _LOGGER.debug('Unable to find an entity "%s"', entity_id)
                 continue
 
             self._init_mode(state)
