@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
     from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
@@ -74,6 +75,7 @@ from .const import (
     ATTR_TRENDING_TOWARDS,
     CONF_DURATION,
     CONF_END,
+    CONF_MAX_SOURCE_AGE,
     CONF_PERIOD_KEYS,
     CONF_PRECISION,
     CONF_PROCESS_UNDEF_AS,
@@ -110,6 +112,7 @@ PLATFORM_SCHEMA = vol.All(
             vol.Optional(CONF_DURATION): cv.positive_time_period,
             vol.Optional(CONF_PRECISION, default=DEFAULT_PRECISION): int,
             vol.Optional(CONF_PROCESS_UNDEF_AS): vol.Any(int, float),
+            vol.Optional(CONF_MAX_SOURCE_AGE): cv.positive_time_period,
         }
     ),
     check_period_keys,
@@ -162,6 +165,7 @@ class AverageSensor(SensorEntity):
         self._period = self.start = self.end = None
         self._precision = config.get(CONF_PRECISION, DEFAULT_PRECISION)
         self._undef = config.get(CONF_PROCESS_UNDEF_AS)
+        self._max_source_age = config.get(CONF_MAX_SOURCE_AGE)
         self._temperature_mode = None
         self._actual_end = None
 
@@ -322,6 +326,22 @@ class AverageSensor(SensorEntity):
                 if self._period:
                     self.max_datetime = state_dt_changed
         return state
+
+    def _is_source_stale(self, state: State, now: datetime) -> bool:
+        """Return True if a source state is older than the configured age limit."""
+        if self._max_source_age is None:
+            return False
+
+        source_age = now - state.last_updated
+        if source_age <= self._max_source_age:
+            return False
+
+        _LOGGER.debug(
+            'Skipping stale source entity "%s"; last updated %s ago',
+            state.entity_id,
+            source_age,
+        )
+        return True
 
     @Throttle(UPDATE_MIN_TIME)
     async def async_update(self) -> None:
@@ -504,6 +524,8 @@ class AverageSensor(SensorEntity):
             if state is None:
                 _LOGGER.debug('Unable to find an entity "%s"', entity_id)
                 continue
+            if self._is_source_stale(state, now):
+                continue
 
             self._init_mode(state)
 
@@ -611,6 +633,7 @@ class AverageSensor(SensorEntity):
         self.min_value = self.max_value = None
         self.min_datetime = self.max_datetime = None
         self.trending_towards = None
+        now = dt_util.utcnow()
 
         # pylint: disable=too-many-nested-blocks
         for entity_id in self.sources:
@@ -620,6 +643,8 @@ class AverageSensor(SensorEntity):
 
             if state is None:
                 _LOGGER.debug('Unable to find an entity "%s"', entity_id)
+                continue
+            if self._is_source_stale(state, now):
                 continue
 
             self._init_mode(state)

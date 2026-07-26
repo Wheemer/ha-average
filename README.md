@@ -158,6 +158,13 @@ I put a lot of work into making this repo and component available and updated to
 > **_Note_**:\
 > This parameter does not affect the calculation of the count, min and max attributes.
 
+**max_source_age**:\
+  _(time) (Optional)_\
+  Maximum age for a source entity's last update. Sources that have not updated within this time are skipped from the calculation.
+
+> **_Note_**:\
+> Freshness is checked against the source entity's `last_updated` timestamp, so a sensor can keep the same value and still be treated as fresh if Home Assistant continues to receive updates from it. This option is useful for ignoring frozen sensors that keep an old state forever.
+
 ### Average Sensor Attributes
 
 **start**:\

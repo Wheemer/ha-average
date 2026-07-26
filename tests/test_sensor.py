@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from asyncio import sleep
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import homeassistant.util.dt as dt_util
 import pytest
@@ -41,6 +41,7 @@ from voluptuous import Invalid
 from custom_components.average.const import (
     CONF_DURATION,
     CONF_END,
+    CONF_MAX_SOURCE_AGE,
     CONF_PRECISION,
     CONF_START,
     DOMAIN,
@@ -529,6 +530,69 @@ async def test_missing_source_is_debug_logged_for_no_period_sensor(
     assert sensor.native_value is None
     assert "Unable to find an entity" in caplog.text
     assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+async def test_stale_source_is_skipped_for_no_period_sensor(
+    hass: HomeAssistant, caplog
+):
+    """Test stale source entities are skipped for no-period sensors."""
+    caplog.set_level(logging.DEBUG)
+    now = dt_util.utcnow()
+    stale_time = now - timedelta(minutes=10)
+    hass.states.async_set(
+        "sensor.stale_source",
+        "100",
+        timestamp=dt_util.as_timestamp(stale_time),
+    )
+    hass.states.async_set(
+        "sensor.fresh_source",
+        "20",
+        timestamp=dt_util.as_timestamp(now),
+    )
+    sensor = AverageSensor(
+        hass,
+        {
+            CONF_NAME: TEST_NAME,
+            CONF_ENTITIES: ["sensor.stale_source", "sensor.fresh_source"],
+            CONF_MAX_SOURCE_AGE: timedelta(minutes=5),
+        },
+    )
+
+    sensor._update_state_no_period()
+
+    assert sensor.native_value == 20
+    assert sensor.available_sources == 1
+    assert "Skipping stale source entity" in caplog.text
+
+
+async def test_stale_source_is_skipped_for_period_sensor(default_sensor, caplog):
+    """Test stale source entities are skipped before history lookup."""
+    caplog.set_level(logging.DEBUG)
+    now = dt_util.utcnow()
+    stale_time = now - timedelta(minutes=10)
+    default_sensor.sources = ["sensor.stale_source", "sensor.fresh_source"]
+    default_sensor.count_sources = 2
+    default_sensor._max_source_age = timedelta(minutes=5)
+    default_sensor.hass.states.async_set(
+        "sensor.stale_source",
+        "100",
+        timestamp=dt_util.as_timestamp(stale_time),
+    )
+    default_sensor.hass.states.async_set(
+        "sensor.fresh_source",
+        "20",
+        timestamp=dt_util.as_timestamp(now),
+    )
+    recorder = MagicMock()
+    recorder.async_add_executor_job = AsyncMock(return_value={})
+
+    with patch("custom_components.average.sensor.get_instance", return_value=recorder):
+        await default_sensor._async_update_state()
+
+    assert default_sensor.native_value == 20
+    assert default_sensor.available_sources == 1
+    assert recorder.async_add_executor_job.call_count == 1
+    assert "Skipping stale source entity" in caplog.text
 
 
 # pylint: disable=protected-access
