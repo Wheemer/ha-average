@@ -197,3 +197,6 @@ async def test_yaml_setup_imports_and_creates_repair(hass):
     issue = issue_registry.async_get_issue(DOMAIN, YAML_IMPORT_ISSUE_ID)
     assert issue is not None
     assert issue.translation_key == "yaml_imported"
+    assert issue.translation_placeholders == {
+        "name": "Average Sensor YAML configuration"
+    }

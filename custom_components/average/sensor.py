@@ -153,6 +153,7 @@ async def async_setup_platform(
         is_persistent=True,
         severity=IssueSeverity.WARNING,
         translation_key="yaml_imported",
+        translation_placeholders={"name": "Average Sensor YAML configuration"},
     )
 
 
