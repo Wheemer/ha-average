@@ -23,7 +23,6 @@ from pytest_homeassistant_custom_component.common import (
     mock_restore_cache,
 )
 
-from custom_components.average.config_flow import SECTION_ADVANCED
 from custom_components.average.const import (
     CONF_DURATION,
     CONF_END,
@@ -57,6 +56,7 @@ async def test_user_flow_creates_entry(hass):
             CONF_NAME: TEST_NAME,
             CONF_ENTITIES: TEST_ENTITY_IDS,
             CONF_DURATION: {"seconds": 30},
+            CONF_SCAN_INTERVAL: {"minutes": 5},
             CONF_PRECISION: 2,
         },
     )
@@ -67,7 +67,7 @@ async def test_user_flow_creates_entry(hass):
     assert result["options"][CONF_NAME] == TEST_NAME
     assert result["options"][CONF_ENTITIES] == TEST_ENTITY_IDS
     assert result["options"][CONF_DURATION] == {"seconds": 30}
-    assert CONF_SCAN_INTERVAL not in result["options"]
+    assert result["options"][CONF_SCAN_INTERVAL] == {"minutes": 5}
 
 
 async def test_user_flow_rejects_invalid_period(hass):
@@ -82,10 +82,8 @@ async def test_user_flow_rejects_invalid_period(hass):
         {
             CONF_NAME: TEST_NAME,
             CONF_ENTITIES: TEST_ENTITY_IDS,
-            SECTION_ADVANCED: {
-                CONF_START: "{{ now() }}",
-                CONF_END: "{{ now() }}",
-            },
+            CONF_START: "{{ now() }}",
+            CONF_END: "{{ now() }}",
             CONF_DURATION: {"seconds": 30},
             CONF_PRECISION: 2,
         },
@@ -119,16 +117,15 @@ async def test_options_flow_updates_entry(hass):
         {
             CONF_ENTITIES: TEST_ENTITY_IDS,
             CONF_DURATION: {"seconds": 60},
+            CONF_SCAN_INTERVAL: {"minutes": 10},
             CONF_PRECISION: 1,
-            SECTION_ADVANCED: {
-                CONF_MAX_SOURCE_AGE: {"minutes": 15},
-            },
+            CONF_MAX_SOURCE_AGE: {"minutes": 15},
         },
     )
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_DURATION] == {"seconds": 60}
-    assert CONF_SCAN_INTERVAL not in result["data"]
+    assert result["data"][CONF_SCAN_INTERVAL] == {"minutes": 10}
     assert result["data"][CONF_MAX_SOURCE_AGE] == {"minutes": 15}
 
 
@@ -142,6 +139,7 @@ async def test_setup_entry_adds_sensor(hass):
             CONF_NAME: TEST_NAME,
             CONF_ENTITIES: TEST_ENTITY_IDS,
             CONF_DURATION: {"seconds": 30},
+            CONF_SCAN_INTERVAL: {"minutes": 5},
             CONF_PRECISION: 2,
         },
     )
@@ -154,7 +152,7 @@ async def test_setup_entry_adds_sensor(hass):
     assert sensor.name == TEST_NAME
     assert sensor.sources == TEST_ENTITY_IDS
     assert sensor._duration == timedelta(seconds=30)
-    assert sensor._update_interval == timedelta(seconds=30)
+    assert sensor._update_interval == timedelta(minutes=5)
 
 
 async def test_config_entry_unloads_and_reloads(hass):

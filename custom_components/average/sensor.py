@@ -265,9 +265,7 @@ class AverageSensor(RestoreSensor):
         self._precision = config.get(CONF_PRECISION, DEFAULT_PRECISION)
         self._undef = config.get(CONF_PROCESS_UNDEF_AS)
         self._max_source_age = config.get(CONF_MAX_SOURCE_AGE)
-        self._update_interval = config.get(
-            CONF_SCAN_INTERVAL, duration or UPDATE_MIN_TIME
-        )
+        self._update_interval = config.get(CONF_SCAN_INTERVAL, UPDATE_MIN_TIME)
         self._last_update = None
         self._temperature_mode = None
         self._actual_end = None
