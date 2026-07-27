@@ -15,7 +15,6 @@ import logging
 import math
 import numbers
 from datetime import timedelta
-from hashlib import sha1 as hash_sha1
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -99,6 +98,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+YAML_IMPORT_ISSUE_ID = "yaml_imported"
 
 
 def check_period_keys(conf: ConfigType) -> ConfigType:
@@ -148,28 +148,11 @@ async def async_setup_platform(
     async_create_issue(
         hass,
         DOMAIN,
-        _yaml_import_issue_id(config),
+        YAML_IMPORT_ISSUE_ID,
         is_fixable=False,
         is_persistent=True,
         severity=IssueSeverity.WARNING,
         translation_key="yaml_imported",
-        translation_placeholders={"name": config[CONF_NAME]},
-    )
-
-
-def _yaml_import_issue_id(config: ConfigType) -> str:
-    """Return a stable Repairs issue ID for imported YAML config."""
-    source = "|".join(
-        [
-            config[CONF_NAME],
-            ",".join(config[CONF_ENTITIES]),
-            str(config.get(CONF_START)),
-            str(config.get(CONF_END)),
-            str(config.get(CONF_DURATION)),
-        ]
-    )
-    return (
-        f"yaml_imported_{hash_sha1(source.encode(), usedforsecurity=False).hexdigest()}"
     )
 
 

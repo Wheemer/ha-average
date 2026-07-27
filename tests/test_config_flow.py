@@ -26,7 +26,7 @@ from custom_components.average.const import (
     DOMAIN,
 )
 from custom_components.average.sensor import (
-    _yaml_import_issue_id,
+    YAML_IMPORT_ISSUE_ID,
     async_setup_entry,
     async_setup_platform,
 )
@@ -169,23 +169,31 @@ async def test_yaml_import_creates_config_entry(hass):
 
 
 async def test_yaml_setup_imports_and_creates_repair(hass):
-    """Test YAML setup imports config and asks the user to remove YAML."""
+    """Test YAML setup imports config and creates one repair issue."""
     yaml_config = deepcopy(MOCK_CONFIG[SENSOR_DOMAIN][0])
+    second_yaml_config = deepcopy(yaml_config)
+    second_yaml_config[CONF_NAME] = "another_test_name"
+    second_yaml_config[CONF_UNIQUE_ID] = "another_test_name"
     async_add_entities = MagicMock()
 
     await async_setup_platform(hass, yaml_config, async_add_entities)
+    await async_setup_platform(hass, second_yaml_config, async_add_entities)
     await hass.async_block_till_done()
 
     async_add_entities.assert_not_called()
 
     entries = hass.config_entries.async_entries(DOMAIN)
-    assert len(entries) == 1
+    assert len(entries) == 2
     assert entries[0].options[CONF_NAME] == TEST_NAME
 
     issue_registry = ir.async_get(hass)
-    issue = issue_registry.async_get_issue(
-        DOMAIN,
-        _yaml_import_issue_id(yaml_config),
-    )
+    issues = [
+        issue
+        for issue in issue_registry.issues.values()
+        if issue.domain == DOMAIN and issue.issue_id == YAML_IMPORT_ISSUE_ID
+    ]
+
+    assert len(issues) == 1
+    issue = issue_registry.async_get_issue(DOMAIN, YAML_IMPORT_ISSUE_ID)
     assert issue is not None
     assert issue.translation_key == "yaml_imported"

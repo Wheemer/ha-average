@@ -68,7 +68,7 @@
   "issues": {
     "yaml_imported": {
       "title": "Average sensor YAML was imported",
-      "description": "The YAML configuration for `{name}` has been imported into the Average Sensor UI integration. Remove that average sensor from YAML to avoid it being imported again on future reloads or restarts."
+      "description": "Average Sensor YAML configuration has been imported into the UI integration. Remove the Average Sensor entries from YAML to avoid importing them again on future reloads or restarts."
     }
   }
 }
