@@ -8,14 +8,20 @@ from unittest.mock import MagicMock
 
 from homeassistant import config_entries
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import (
     CONF_ENTITIES,
     CONF_NAME,
     CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
+    UnitOfTemperature,
 )
+from homeassistant.core import CoreState, State
 from homeassistant.helpers import issue_registry as ir
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    mock_restore_cache,
+)
 
 from custom_components.average.const import (
     CONF_DURATION,
@@ -147,6 +153,88 @@ async def test_setup_entry_adds_sensor(hass):
     assert sensor.sources == TEST_ENTITY_IDS
     assert sensor._duration == timedelta(seconds=30)
     assert sensor._update_interval == timedelta(minutes=5)
+
+
+async def test_config_entry_unloads_and_reloads(hass):
+    """Test config entry setup, unload, and reload."""
+    hass.states.async_set(TEST_ENTITY_IDS[0], "4")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=TEST_NAME,
+        data={},
+        options={
+            CONF_NAME: TEST_NAME,
+            CONF_ENTITIES: [TEST_ENTITY_IDS[0]],
+            CONF_UNIQUE_ID: TEST_NAME,
+            CONF_PRECISION: 2,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert hass.states.get(f"{SENSOR_DOMAIN}.{TEST_NAME}")
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.NOT_LOADED
+    unloaded_state = hass.states.get(f"{SENSOR_DOMAIN}.{TEST_NAME}")
+    assert unloaded_state is not None
+    assert unloaded_state.attributes["restored"] is True
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    reloaded_state = hass.states.get(f"{SENSOR_DOMAIN}.{TEST_NAME}")
+    assert reloaded_state
+    assert "restored" not in reloaded_state.attributes
+
+
+async def test_config_entry_restores_state_before_period_refresh(hass):
+    """Test a period sensor restores its previous state while waiting to refresh."""
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                f"{SENSOR_DOMAIN}.{TEST_NAME}",
+                "21.25",
+                {
+                    "available_sources": 1,
+                    "count": 1,
+                    "count_sources": 1,
+                    "unit_of_measurement": UnitOfTemperature.CELSIUS,
+                },
+            )
+        ],
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=TEST_NAME,
+        data={},
+        options={
+            CONF_NAME: TEST_NAME,
+            CONF_ENTITIES: [TEST_ENTITY_IDS[0]],
+            CONF_UNIQUE_ID: TEST_NAME,
+            CONF_DURATION: {"seconds": 30},
+            CONF_PRECISION: 2,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    hass.set_state(CoreState.not_running)
+    try:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+    finally:
+        hass.set_state(CoreState.running)
+
+    state = hass.states.get(f"{SENSOR_DOMAIN}.{TEST_NAME}")
+    assert state is not None
+    assert state.state == "21.25"
+    assert state.attributes["available_sources"] == 1
 
 
 async def test_yaml_import_creates_config_entry(hass):

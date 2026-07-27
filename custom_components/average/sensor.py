@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import math
 import numbers
+from contextlib import suppress
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -36,8 +37,8 @@ from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
-    SensorEntity,
     SensorStateClass,
 )
 from homeassistant.components.water_heater import DOMAIN as WATER_HEATER_DOMAIN
@@ -229,7 +230,7 @@ async def async_setup_entry(
 
 
 # pylint: disable=too-many-instance-attributes
-class AverageSensor(SensorEntity):
+class AverageSensor(RestoreSensor):
     """Implementation of an Average sensor."""
 
     _unrecorded_attributes = frozenset(
@@ -328,6 +329,7 @@ class AverageSensor(SensorEntity):
     async def async_added_to_hass(self) -> None:
         """Register callbacks."""
         startup_fired = False
+        await self._async_restore_previous_state()
 
         # pylint: disable=unused-argument
         @callback
@@ -369,6 +371,49 @@ class AverageSensor(SensorEntity):
                     remove_startup_listener()
 
             self.async_on_remove(async_remove_startup_listener)
+
+    async def _async_restore_previous_state(self) -> None:
+        """Restore the last known state until the next refresh completes."""
+        last_sensor_data = await self.async_get_last_sensor_data()
+        last_state = await self.async_get_last_state()
+
+        if last_sensor_data is not None:
+            native_value = last_sensor_data.native_value
+            native_unit = last_sensor_data.native_unit_of_measurement
+        elif last_state is not None:
+            native_value = last_state.state
+            native_unit = last_state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+        else:
+            return
+
+        if not self._has_state(str(native_value)):
+            return
+
+        with suppress(TypeError, ValueError):
+            native_value = float(native_value)
+
+        self._attr_native_value = native_value
+        self._attr_native_unit_of_measurement = native_unit
+
+        if self._attr_native_unit_of_measurement in TEMPERATURE_UNITS:
+            self._temperature_mode = True
+            self._attr_device_class = SensorDeviceClass.TEMPERATURE
+
+        if last_state is not None:
+            self.available_sources = last_state.attributes.get(
+                ATTR_AVAILABLE_SOURCES, self.count_sources
+            )
+            self.count = last_state.attributes.get(ATTR_COUNT, self.count)
+            self.count_sources = last_state.attributes.get(
+                ATTR_COUNT_SOURCES, self.count_sources
+            )
+            self.min_value = last_state.attributes.get(ATTR_MIN_VALUE)
+            self.max_value = last_state.attributes.get(ATTR_MAX_VALUE)
+            self.trending_towards = last_state.attributes.get(ATTR_TRENDING_TOWARDS)
+        else:
+            self.available_sources = self.count_sources
+
+        self.async_write_ha_state()
 
     @staticmethod
     def _has_state(state: str | None) -> bool:
