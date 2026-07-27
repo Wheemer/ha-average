@@ -27,11 +27,12 @@ from homeassistant.const import (
     CONF_PLATFORM,
     CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
+    EVENT_HOMEASSISTANT_START,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     UnitOfTemperature,
 )
-from homeassistant.core import HomeAssistant, State
+from homeassistant.core import CoreState, Event, HomeAssistant, State
 from homeassistant.helpers.template import Template
 from homeassistant.setup import async_setup_component
 from homeassistant.util.unit_system import TEMPERATURE_UNITS
@@ -257,6 +258,73 @@ async def test_added_to_hass_registers_removable_state_listener(
     track_state.assert_called_once()
     sensor._call_on_remove_callbacks()
     unsubscribe.assert_called_once()
+
+
+async def test_added_to_hass_removes_pending_startup_listener(
+    hass: HomeAssistant,
+):
+    """Test pending startup listeners are removed when a sensor is unloaded."""
+    unsubscribe = MagicMock()
+    sensor = AverageSensor(
+        hass,
+        {
+            CONF_NAME: TEST_NAME,
+            CONF_ENTITIES: ["sensor.test_monitored"],
+            CONF_DURATION: timedelta(seconds=10),
+        },
+    )
+
+    hass.set_state(CoreState.not_running)
+    try:
+        with patch(
+            "homeassistant.core.EventBus.async_listen_once",
+            return_value=unsubscribe,
+        ) as listen_once:
+            await sensor.async_added_to_hass()
+    finally:
+        hass.set_state(CoreState.running)
+
+    listen_once.assert_called_once()
+    sensor._call_on_remove_callbacks()
+    unsubscribe.assert_called_once()
+
+
+async def test_added_to_hass_does_not_remove_fired_startup_listener(
+    hass: HomeAssistant,
+):
+    """Test fired one-time startup listeners are not removed again."""
+    unsubscribe = MagicMock()
+    startup_listener = None
+    sensor = AverageSensor(
+        hass,
+        {
+            CONF_NAME: TEST_NAME,
+            CONF_ENTITIES: ["sensor.test_monitored"],
+            CONF_DURATION: timedelta(seconds=10),
+        },
+    )
+    sensor.async_schedule_update_ha_state = MagicMock()
+
+    def async_listen_once(event_type, listener) -> MagicMock:
+        nonlocal startup_listener
+        startup_listener = listener
+        return unsubscribe
+
+    hass.set_state(CoreState.not_running)
+    try:
+        with patch(
+            "homeassistant.core.EventBus.async_listen_once",
+            side_effect=async_listen_once,
+        ):
+            await sensor.async_added_to_hass()
+    finally:
+        hass.set_state(CoreState.running)
+
+    assert startup_listener is not None
+    await startup_listener(Event(EVENT_HOMEASSISTANT_START))
+    sensor._call_on_remove_callbacks()
+
+    unsubscribe.assert_not_called()
 
 
 # pylint: disable=protected-access

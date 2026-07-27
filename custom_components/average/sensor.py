@@ -229,6 +229,7 @@ class AverageSensor(SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         """Register callbacks."""
+        startup_fired = False
 
         # pylint: disable=unused-argument
         @callback
@@ -243,6 +244,9 @@ class AverageSensor(SensorEntity):
         @callback
         async def async_sensor_startup(event: Event) -> None:  # noqa: ARG001
             """Update template on startup."""
+            nonlocal startup_fired
+            startup_fired = True
+
             if self._has_period:
                 self.async_schedule_update_ha_state(force_refresh=True)
             else:
@@ -256,11 +260,17 @@ class AverageSensor(SensorEntity):
         if self.hass.is_running:
             await async_sensor_startup(Event("reload"))
         else:
-            self.async_on_remove(
-                self.hass.bus.async_listen_once(
-                    EVENT_HOMEASSISTANT_START, async_sensor_startup
-                )
+            remove_startup_listener = self.hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_START, async_sensor_startup
             )
+
+            @callback
+            def async_remove_startup_listener() -> None:
+                """Remove startup listener if it has not fired yet."""
+                if not startup_fired:
+                    remove_startup_listener()
+
+            self.async_on_remove(async_remove_startup_listener)
 
     @staticmethod
     def _has_state(state: str | None) -> bool:
