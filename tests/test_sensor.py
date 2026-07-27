@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import logging
-from asyncio import sleep
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,6 +25,7 @@ from homeassistant.const import (
     CONF_ENTITIES,
     CONF_NAME,
     CONF_PLATFORM,
+    CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
@@ -540,13 +540,32 @@ async def test__init_mode_upgrades_after_missing_metadata(
 
 
 async def test_update(default_sensor):
-    """Test update throttler."""
+    """Test default update interval."""
     with patch.object(default_sensor, "_async_update_state") as ups:
         await default_sensor.async_update()
-        await sleep(1)
         await default_sensor.async_update()
 
         assert ups.call_count == 1
+
+
+async def test_update_respects_configured_scan_interval(hass: HomeAssistant):
+    """Test custom scan interval for period sensors."""
+    sensor = AverageSensor(
+        hass,
+        {
+            CONF_NAME: TEST_NAME,
+            CONF_ENTITIES: TEST_ENTITY_IDS,
+            CONF_DURATION: timedelta(minutes=3),
+            CONF_SCAN_INTERVAL: timedelta(seconds=5),
+        },
+    )
+
+    with patch.object(sensor, "_async_update_state") as ups:
+        await sensor.async_update()
+        sensor._last_update = dt_util.utcnow() - timedelta(seconds=6)
+        await sensor.async_update()
+
+        assert ups.call_count == 2
 
 
 async def test_missing_source_is_debug_logged_for_period_sensor(default_sensor, caplog):

@@ -42,6 +42,7 @@ from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
     CONF_ENTITIES,
     CONF_NAME,
+    CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
     EVENT_HOMEASSISTANT_START,
     STATE_UNAVAILABLE,
@@ -59,7 +60,6 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.config_validation import PLATFORM_SCHEMA
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.group import expand_entity_ids
-from homeassistant.util import Throttle
 from homeassistant.util.unit_conversion import TemperatureConverter
 from homeassistant.util.unit_system import TEMPERATURE_UNITS
 
@@ -166,6 +166,8 @@ class AverageSensor(SensorEntity):
         self._precision = config.get(CONF_PRECISION, DEFAULT_PRECISION)
         self._undef = config.get(CONF_PROCESS_UNDEF_AS)
         self._max_source_age = config.get(CONF_MAX_SOURCE_AGE)
+        self._update_interval = config.get(CONF_SCAN_INTERVAL, UPDATE_MIN_TIME)
+        self._last_update = None
         self._temperature_mode = None
         self._actual_end = None
 
@@ -352,11 +354,20 @@ class AverageSensor(SensorEntity):
         )
         return True
 
-    @Throttle(UPDATE_MIN_TIME)
     async def async_update(self) -> None:
         """Update the sensor state if it needed."""
-        if self._has_period:
-            await self._async_update_state()
+        if not self._has_period:
+            return
+
+        now = dt_util.utcnow()
+        if (
+            self._last_update is not None
+            and now - self._last_update < self._update_interval
+        ):
+            return
+
+        self._last_update = now
+        await self._async_update_state()
 
     @staticmethod
     def handle_template_exception(exc: Exception, field: str) -> None:

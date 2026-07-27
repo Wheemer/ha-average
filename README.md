@@ -89,6 +89,8 @@ sensor:
     name: 'Average Temperature'
     duration:
       days: 1
+    scan_interval:
+      minutes: 5
     entities:
       - sensor.gismeteo_temperature
 ```
@@ -143,6 +145,14 @@ I put a lot of work into making this repo and component available and updated to
 **duration**:\
   _(time) (Optional)_\
   Duration of the measure.
+
+**scan_interval**:\
+  _(time) (Optional)_\
+  Minimum time between recalculations for period-based sensors using `start`, `end`, or `duration`.\
+  _Default value: 20 seconds_
+
+> **_Note_**:\
+> Long periods can require large recorder history queries. If a sensor averages hours, days, or months of history, increase `scan_interval` so the same expensive query does not run every time a source entity changes.
 
 **precision**:\
   _(number) (Optional)_\
