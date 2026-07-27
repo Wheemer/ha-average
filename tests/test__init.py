@@ -36,8 +36,8 @@ async def test_reload(hass):
     assert hass.states.get(f"{SENSOR_DOMAIN}.{TEST_NAME}")
 
 
-async def test_reload_and_remove_all(hass):
-    """Verify we can reload and remove all."""
+async def test_reload_after_yaml_removed_keeps_imported_entry(hass):
+    """Verify imported entries survive when YAML is removed."""
     assert await async_setup_component(hass, SENSOR_DOMAIN, MOCK_CONFIG)
     await hass.async_block_till_done()
     await hass.async_start()
@@ -53,4 +53,4 @@ async def test_reload_and_remove_all(hass):
         await hass.services.async_call(DOMAIN, SERVICE_RELOAD, {}, blocking=True)
         await hass.async_block_till_done()
 
-    assert hass.states.get(f"{SENSOR_DOMAIN}.{TEST_NAME}") is None
+    assert hass.states.get(f"{SENSOR_DOMAIN}.{TEST_NAME}")

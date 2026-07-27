@@ -14,13 +14,19 @@ from __future__ import annotations
 import logging
 import math
 import numbers
+from datetime import timedelta
+from hashlib import sha1 as hash_sha1
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import datetime
 
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.helpers.entity_platform import (
+        AddConfigEntryEntitiesCallback,
+        AddEntitiesCallback,
+    )
     from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from _sha1 import sha1
@@ -36,6 +42,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.components.water_heater import DOMAIN as WATER_HEATER_DOMAIN
 from homeassistant.components.weather import DOMAIN as WEATHER_DOMAIN
+from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
     ATTR_ICON,
@@ -60,6 +67,8 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.config_validation import PLATFORM_SCHEMA
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.group import expand_entity_ids
+from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
+from homeassistant.helpers.template import Template
 from homeassistant.util.unit_conversion import TemperatureConverter
 from homeassistant.util.unit_system import TEMPERATURE_UNITS
 
@@ -82,6 +91,7 @@ from .const import (
     CONF_START,
     DEFAULT_NAME,
     DEFAULT_PRECISION,
+    DOMAIN,
     UPDATE_MIN_TIME,
 )
 
@@ -123,11 +133,93 @@ PLATFORM_SCHEMA = vol.All(
 async def async_setup_platform(
     hass: HomeAssistant,
     config: ConfigType,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddEntitiesCallback,  # noqa: ARG001
     discovery_info: DiscoveryInfoType | None = None,  # noqa: ARG001
 ) -> None:
     """Set up platform."""
-    async_add_entities([AverageSensor(hass, config)])
+    await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_IMPORT},
+        data=config,
+    )
+    async_create_issue(
+        hass,
+        DOMAIN,
+        _yaml_import_issue_id(config),
+        is_fixable=False,
+        is_persistent=True,
+        severity=IssueSeverity.WARNING,
+        translation_key="yaml_imported",
+        translation_placeholders={"name": config[CONF_NAME]},
+    )
+
+
+def _yaml_import_issue_id(config: ConfigType) -> str:
+    """Return a stable Repairs issue ID for imported YAML config."""
+    source = "|".join(
+        [
+            config[CONF_NAME],
+            ",".join(config[CONF_ENTITIES]),
+            str(config.get(CONF_START)),
+            str(config.get(CONF_END)),
+            str(config.get(CONF_DURATION)),
+        ]
+    )
+    return (
+        f"yaml_imported_{hash_sha1(source.encode(), usedforsecurity=False).hexdigest()}"
+    )
+
+
+def _duration_from_selector(value: Any) -> timedelta | None:
+    """Convert a duration selector value to a timedelta."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, timedelta):
+        return value
+    if isinstance(value, dict):
+        return timedelta(
+            days=value.get("days", 0) or 0,
+            hours=value.get("hours", 0) or 0,
+            minutes=value.get("minutes", 0) or 0,
+            seconds=value.get("seconds", 0) or 0,
+            milliseconds=value.get("milliseconds", 0) or 0,
+        )
+    return value
+
+
+def _entry_config(hass: HomeAssistant, config_entry: ConfigEntry) -> ConfigType:
+    """Convert a config entry into AverageSensor config."""
+    options = {**config_entry.data, **config_entry.options}
+    config: dict[str, Any] = {
+        CONF_NAME: options[CONF_NAME],
+        CONF_ENTITIES: options[CONF_ENTITIES],
+        CONF_UNIQUE_ID: config_entry.entry_id,
+        CONF_PRECISION: int(options.get(CONF_PRECISION, DEFAULT_PRECISION)),
+    }
+
+    for key in (CONF_START, CONF_END):
+        value = options.get(key)
+        if value:
+            config[key] = Template(value, hass)
+
+    for key in (CONF_DURATION, CONF_MAX_SOURCE_AGE, CONF_SCAN_INTERVAL):
+        duration = _duration_from_selector(options.get(key))
+        if duration is not None:
+            config[key] = duration
+
+    if (undef := options.get(CONF_PROCESS_UNDEF_AS)) is not None:
+        config[CONF_PROCESS_UNDEF_AS] = undef
+
+    return config
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Set up Average Sensor from a config entry."""
+    async_add_entities([AverageSensor(hass, _entry_config(hass, config_entry))])
 
 
 # pylint: disable=too-many-instance-attributes

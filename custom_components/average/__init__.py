@@ -19,6 +19,7 @@ from homeassistant.const import SERVICE_RELOAD
 from homeassistant.helpers.reload import async_reload_integration_platforms
 
 if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant, ServiceCall
     from homeassistant.helpers.typing import ConfigType
 
@@ -41,3 +42,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:  # noqa:
     )
 
     return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Average Sensor from a config entry."""
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload an Average Sensor config entry."""
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

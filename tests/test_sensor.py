@@ -129,19 +129,22 @@ async def test_invalid_check_period_keys(hass: HomeAssistant):
 
 
 async def test_setup_platform(hass: HomeAssistant):
-    """Test platform setup."""
+    """Test YAML platform setup imports a config entry."""
     async_add_entities = MagicMock()
 
     config = {
         CONF_PLATFORM: DOMAIN,
         CONF_NAME: "test",
         CONF_ENTITIES: ["sensor.test_monitored"],
-        CONF_START: Template("{{ 0 }}"),
+        CONF_START: Template("{{ 0 }}", hass),
         CONF_DURATION: timedelta(seconds=10),
     }
 
     await async_setup_platform(hass, config, async_add_entities, None)
-    assert async_add_entities.called
+    await hass.async_block_till_done()
+
+    assert not async_add_entities.called
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
 
 async def test_entity_initialization(
