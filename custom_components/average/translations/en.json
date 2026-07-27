@@ -8,23 +8,32 @@
         "data": {
           "name": "Name",
           "entities": "Source entities",
-          "start": "Custom range start template",
-          "end": "Custom range end template",
           "duration": "Average window",
-          "scan_interval": "Update interval",
           "precision": "Decimal places",
-          "process_undef_as": "Fallback value for unavailable sources",
-          "max_source_age": "Maximum source age"
+          "advanced_options": "Advanced"
         },
         "data_description": {
           "entities": "Sensors, numbers, input numbers, weather, climate, or water heater entities to include in the average.",
-          "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
-          "end": "Optional template that renders the end of the history range as a datetime or timestamp. Use with start or average window. Leave empty to end at now.",
-          "duration": "Optional history window to average. Leave empty to average current states only.",
-          "scan_interval": "Minimum time between history recalculations. Increase this for long history windows to reduce recorder load.",
-          "precision": "Number of decimal places used for the sensor state.",
-          "process_undef_as": "Optional numeric value to use when a source is unavailable or unknown. Leave empty to ignore unavailable sources.",
-          "max_source_age": "Optional freshness limit. Sources older than this are ignored so stale readings do not stay in the average forever."
+          "duration": "History window to average. The sensor recalculates on the same interval. Leave empty to average current states only.",
+          "precision": "Number of decimal places used for the sensor state."
+        },
+        "sections": {
+          "advanced_options": {
+            "name": "Advanced",
+            "description": "Optional settings for custom history ranges and unavailable or stale source handling.",
+            "data": {
+              "start": "Custom range start template",
+              "end": "Custom range end template",
+              "process_undef_as": "Fallback value for unavailable sources",
+              "max_source_age": "Maximum source age"
+            },
+            "data_description": {
+              "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
+              "end": "Optional template that renders the end of the history range as a datetime or timestamp. Use with start or average window. Leave empty to end at now.",
+              "process_undef_as": "Optional numeric value to use when a source is unavailable or unknown. Leave empty to ignore unavailable sources.",
+              "max_source_age": "Optional freshness limit. Sources older than this are ignored so stale readings do not stay in the average forever."
+            }
+          }
         }
       }
     },
@@ -40,23 +49,32 @@
         "description": "Update the source entities and averaging behavior.",
         "data": {
           "entities": "Source entities",
-          "start": "Custom range start template",
-          "end": "Custom range end template",
           "duration": "Average window",
-          "scan_interval": "Update interval",
           "precision": "Decimal places",
-          "process_undef_as": "Fallback value for unavailable sources",
-          "max_source_age": "Maximum source age"
+          "advanced_options": "Advanced"
         },
         "data_description": {
           "entities": "Sensors, numbers, input numbers, weather, climate, or water heater entities to include in the average.",
-          "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
-          "end": "Optional template that renders the end of the history range as a datetime or timestamp. Use with start or average window. Leave empty to end at now.",
-          "duration": "Optional history window to average. Leave empty to average current states only.",
-          "scan_interval": "Minimum time between history recalculations. Increase this for long history windows to reduce recorder load.",
-          "precision": "Number of decimal places used for the sensor state.",
-          "process_undef_as": "Optional numeric value to use when a source is unavailable or unknown. Leave empty to ignore unavailable sources.",
-          "max_source_age": "Optional freshness limit. Sources older than this are ignored so stale readings do not stay in the average forever."
+          "duration": "History window to average. The sensor recalculates on the same interval. Leave empty to average current states only.",
+          "precision": "Number of decimal places used for the sensor state."
+        },
+        "sections": {
+          "advanced_options": {
+            "name": "Advanced",
+            "description": "Optional settings for custom history ranges and unavailable or stale source handling.",
+            "data": {
+              "start": "Custom range start template",
+              "end": "Custom range end template",
+              "process_undef_as": "Fallback value for unavailable sources",
+              "max_source_age": "Maximum source age"
+            },
+            "data_description": {
+              "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
+              "end": "Optional template that renders the end of the history range as a datetime or timestamp. Use with start or average window. Leave empty to end at now.",
+              "process_undef_as": "Optional numeric value to use when a source is unavailable or unknown. Leave empty to ignore unavailable sources.",
+              "max_source_age": "Optional freshness limit. Sources older than this are ignored so stale readings do not stay in the average forever."
+            }
+          }
         }
       }
     },

@@ -19,6 +19,7 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
 )
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 from homeassistant.helpers.schema_config_entry_flow import (
     SchemaConfigFlowHandler,
@@ -45,7 +46,7 @@ if TYPE_CHECKING:
 
 ERR_PERIOD_START_OR_END_WITHOUT_DURATION = "period_start_or_end_without_duration"
 ERR_TOO_MANY_PERIOD_OPTIONS = "too_many_period_options"
-DEFAULT_SCAN_INTERVAL_SELECTOR = {"seconds": 20}
+SECTION_ADVANCED = "advanced_options"
 
 SOURCE_DOMAINS = [
     SENSOR_DOMAIN,
@@ -57,8 +58,48 @@ SOURCE_DOMAINS = [
 ]
 
 
+def _nested_options(options: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert flat saved options to sectioned form values."""
+    advanced = {
+        key: options[key]
+        for key in (
+            CONF_START,
+            CONF_END,
+            CONF_PROCESS_UNDEF_AS,
+            CONF_MAX_SOURCE_AGE,
+        )
+        if key in options
+    }
+    nested = {
+        key: value
+        for key, value in options.items()
+        if key
+        not in (
+            CONF_START,
+            CONF_END,
+            CONF_PROCESS_UNDEF_AS,
+            CONF_MAX_SOURCE_AGE,
+            CONF_SCAN_INTERVAL,
+        )
+    }
+    if advanced:
+        nested[SECTION_ADVANCED] = advanced
+    return nested
+
+
+def _flatten_options(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Convert sectioned form values to flat config entry options."""
+    options = dict(user_input)
+    advanced = options.pop(SECTION_ADVANCED, {}) or {}
+    for key in (CONF_START, CONF_END, CONF_PROCESS_UNDEF_AS, CONF_MAX_SOURCE_AGE):
+        if (value := advanced.get(key)) not in (None, ""):
+            options[key] = value
+    return options
+
+
 def _validate_period(user_input: dict[str, Any]) -> dict[str, Any]:
     """Validate period fields."""
+    user_input = _flatten_options(user_input)
     has_start = bool(user_input.get(CONF_START))
     has_end = bool(user_input.get(CONF_END))
     has_duration = user_input.get(CONF_DURATION) is not None
@@ -143,6 +184,11 @@ async def validate_options(
     return _validate_period(user_input)
 
 
+async def suggested_options(handler: SchemaConfigFlowHandler) -> dict[str, Any]:
+    """Return sectioned suggested values for the options flow."""
+    return _nested_options(handler.options)
+
+
 OPTIONS_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_ENTITIES): selector.EntitySelector(
@@ -157,14 +203,6 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Optional(CONF_DURATION): selector.DurationSelector(
             selector.DurationSelectorConfig(allow_negative=False)
         ),
-        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_SELECTOR): (
-            selector.DurationSelector(
-                selector.DurationSelectorConfig(
-                    enable_day=False,
-                    allow_negative=False,
-                )
-            )
-        ),
         vol.Optional(CONF_PRECISION, default=DEFAULT_PRECISION): (
             selector.NumberSelector(
                 selector.NumberSelectorConfig(
@@ -175,11 +213,22 @@ OPTIONS_SCHEMA = vol.Schema(
                 )
             )
         ),
-        vol.Optional(CONF_PROCESS_UNDEF_AS): selector.NumberSelector(
-            selector.NumberSelectorConfig(mode=selector.NumberSelectorMode.BOX)
-        ),
-        vol.Optional(CONF_MAX_SOURCE_AGE): selector.DurationSelector(
-            selector.DurationSelectorConfig(allow_negative=False)
+        vol.Optional(SECTION_ADVANCED): section(
+            vol.Schema(
+                {
+                    vol.Optional(CONF_START): selector.TextSelector(),
+                    vol.Optional(CONF_END): selector.TextSelector(),
+                    vol.Optional(CONF_PROCESS_UNDEF_AS): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX
+                        )
+                    ),
+                    vol.Optional(CONF_MAX_SOURCE_AGE): selector.DurationSelector(
+                        selector.DurationSelectorConfig(allow_negative=False)
+                    ),
+                }
+            ),
+            {"collapsed": True},
         ),
     }
 )
@@ -201,6 +250,7 @@ OPTIONS_FLOW = {
     "init": SchemaFlowFormStep(
         OPTIONS_SCHEMA,
         validate_user_input=validate_options,
+        suggested_values=suggested_options,
     ),
 }
 
@@ -215,6 +265,12 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
     def async_config_entry_title(self, options: Mapping[str, Any]) -> str:
         """Return config entry title."""
         return cast("str", options.get(CONF_NAME, DEFAULT_NAME))
+
+    @staticmethod
+    def async_options_flow_finished(_hass: Any, options: Mapping[str, Any]) -> None:
+        """Clean up deprecated hidden options after the options flow."""
+        if isinstance(options, dict):
+            options.pop(CONF_SCAN_INTERVAL, None)
 
     async def async_step_import(
         self,
