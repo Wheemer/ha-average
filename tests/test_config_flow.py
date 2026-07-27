@@ -8,7 +8,12 @@ from unittest.mock import MagicMock
 
 from homeassistant import config_entries
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.const import CONF_ENTITIES, CONF_NAME, CONF_SCAN_INTERVAL
+from homeassistant.const import (
+    CONF_ENTITIES,
+    CONF_NAME,
+    CONF_SCAN_INTERVAL,
+    CONF_UNIQUE_ID,
+)
 from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -147,6 +152,7 @@ async def test_setup_entry_adds_sensor(hass):
 async def test_yaml_import_creates_config_entry(hass):
     """Test importing YAML as a config entry."""
     yaml_config = deepcopy(MOCK_CONFIG[SENSOR_DOMAIN][0])
+    yaml_config[CONF_UNIQUE_ID] = "test_name"
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -159,6 +165,7 @@ async def test_yaml_import_creates_config_entry(hass):
     assert result["data"] == {}
     assert result["options"][CONF_NAME] == TEST_NAME
     assert result["options"][CONF_ENTITIES] == TEST_ENTITY_IDS
+    assert result["options"][CONF_UNIQUE_ID] == "test_name"
 
 
 async def test_yaml_setup_imports_and_creates_repair(hass):

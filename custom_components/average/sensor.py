@@ -35,6 +35,7 @@ import homeassistant.util.dt as dt_util
 import voluptuous as vol
 from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.components.recorder import get_instance, history
+from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -64,11 +65,13 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.config_validation import PLATFORM_SCHEMA
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.group import expand_entity_ids
 from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
 from homeassistant.helpers.template import Template
+from homeassistant.util import slugify
 from homeassistant.util.unit_conversion import TemperatureConverter
 from homeassistant.util.unit_system import TEMPERATURE_UNITS
 
@@ -187,13 +190,32 @@ def _duration_from_selector(value: Any) -> timedelta | None:
     return value
 
 
+def _entry_unique_id(
+    hass: HomeAssistant, options: Mapping[str, Any], entry_id: str
+) -> str:
+    """Return the sensor unique ID for a config entry."""
+    if unique_id := options.get(CONF_UNIQUE_ID):
+        return unique_id
+
+    legacy_unique_id = slugify(options[CONF_NAME])
+    entity_id = er.async_get(hass).async_get_entity_id(
+        SENSOR_DOMAIN,
+        DOMAIN,
+        legacy_unique_id,
+    )
+    if entity_id:
+        return legacy_unique_id
+
+    return entry_id
+
+
 def _entry_config(hass: HomeAssistant, config_entry: ConfigEntry) -> ConfigType:
     """Convert a config entry into AverageSensor config."""
     options = {**config_entry.data, **config_entry.options}
     config: dict[str, Any] = {
         CONF_NAME: options[CONF_NAME],
         CONF_ENTITIES: options[CONF_ENTITIES],
-        CONF_UNIQUE_ID: config_entry.entry_id,
+        CONF_UNIQUE_ID: _entry_unique_id(hass, options, config_entry.entry_id),
         CONF_PRECISION: int(options.get(CONF_PRECISION, DEFAULT_PRECISION)),
     }
 

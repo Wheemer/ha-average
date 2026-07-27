@@ -13,7 +13,12 @@ from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.components.water_heater import DOMAIN as WATER_HEATER_DOMAIN
 from homeassistant.components.weather import DOMAIN as WEATHER_DOMAIN
-from homeassistant.const import CONF_ENTITIES, CONF_NAME, CONF_SCAN_INTERVAL
+from homeassistant.const import (
+    CONF_ENTITIES,
+    CONF_NAME,
+    CONF_SCAN_INTERVAL,
+    CONF_UNIQUE_ID,
+)
 from homeassistant.helpers import selector
 from homeassistant.helpers.schema_config_entry_flow import (
     SchemaConfigFlowHandler,
@@ -98,6 +103,9 @@ def _yaml_config_to_options(config: dict[str, Any]) -> dict[str, Any]:
         CONF_PRECISION: int(config.get(CONF_PRECISION, DEFAULT_PRECISION)),
     }
 
+    if unique_id := config.get(CONF_UNIQUE_ID):
+        options[CONF_UNIQUE_ID] = unique_id
+
     for key in (CONF_START, CONF_END):
         if value := _template_to_string(config.get(key)):
             options[key] = value
@@ -116,6 +124,7 @@ def _import_unique_id(options: dict[str, Any]) -> str:
     """Return a stable unique ID for an imported YAML average sensor."""
     source = "|".join(
         [
+            str(options.get(CONF_UNIQUE_ID)),
             options[CONF_NAME],
             ",".join(options[CONF_ENTITIES]),
             str(options.get(CONF_START)),
