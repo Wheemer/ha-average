@@ -1,0 +1,96 @@
+{
+  "title": "Average Sensor",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Create average sensor",
+        "description": "Create a sensor that averages current source states or source history over a time window.",
+        "data": {
+          "name": "Name",
+          "entities": "Source entities",
+          "duration": "Average window",
+          "precision": "Decimal places",
+          "require_all_sources": "Require all source sensors"
+        },
+        "data_description": {
+          "entities": "Sensors, numbers, input numbers, weather, climate, or water heater entities to include in the average.",
+          "duration": "Optional history window to average. Leave empty to average current states only.",
+          "precision": "Number of decimal places used for the sensor state.",
+          "require_all_sources": "Make the average unavailable if any source is missing, invalid, or older than the maximum source age. No fallback value overrides this requirement."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced",
+            "data": {
+              "start": "Custom range start template",
+              "end": "Custom range end template",
+              "scan_interval": "Update interval",
+              "process_undef_as": "Fallback value for unavailable sources",
+              "max_source_age": "Maximum source age"
+            },
+            "data_description": {
+              "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
+              "end": "Optional template that renders the end of the history range as a datetime or timestamp. Use with start or average window. Leave empty to end at now.",
+              "scan_interval": "Minimum time between history recalculations. Increase this for long history windows to reduce recorder load.",
+              "process_undef_as": "Optional numeric value to use when a source is unavailable or unknown. Leave empty to ignore unavailable sources.",
+              "max_source_age": "Optional freshness limit. Sources older than this are ignored so stale readings do not stay in the average forever."
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "period_start_or_end_without_duration": "Set an average window when using only start or only end.",
+      "too_many_period_options": "Use no range, only an average window, or two of start, end, and average window."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure average sensor",
+        "description": "Update the source entities and averaging behavior.",
+        "data": {
+          "entities": "Source entities",
+          "duration": "Average window",
+          "precision": "Decimal places",
+          "require_all_sources": "Require all source sensors"
+        },
+        "data_description": {
+          "entities": "Sensors, numbers, input numbers, weather, climate, or water heater entities to include in the average.",
+          "duration": "Optional history window to average. Leave empty to average current states only.",
+          "precision": "Number of decimal places used for the sensor state.",
+          "require_all_sources": "Make the average unavailable if any source is missing, invalid, or older than the maximum source age. No fallback value overrides this requirement."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced",
+            "data": {
+              "start": "Custom range start template",
+              "end": "Custom range end template",
+              "scan_interval": "Update interval",
+              "process_undef_as": "Fallback value for unavailable sources",
+              "max_source_age": "Maximum source age"
+            },
+            "data_description": {
+              "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
+              "end": "Optional template that renders the end of the history range as a datetime or timestamp. Use with start or average window. Leave empty to end at now.",
+              "scan_interval": "Minimum time between history recalculations. Increase this for long history windows to reduce recorder load.",
+              "process_undef_as": "Optional numeric value to use when a source is unavailable or unknown. Leave empty to ignore unavailable sources.",
+              "max_source_age": "Optional freshness limit. Sources older than this are ignored so stale readings do not stay in the average forever."
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "period_start_or_end_without_duration": "Set an average window when using only start or only end.",
+      "too_many_period_options": "Use no range, only an average window, or two of start, end, and average window."
+    }
+  },
+  "issues": {
+    "yaml_imported": {
+      "title": "Average sensor YAML was imported",
+      "description": "Average Sensor YAML configuration has been imported into the UI integration. Remove the Average Sensor entries from YAML to avoid importing them again on future reloads or restarts."
+    }
+  }
+}

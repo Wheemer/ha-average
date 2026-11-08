@@ -37,6 +37,8 @@ CONF_DURATION: Final = "duration"
 CONF_PRECISION: Final = "precision"
 CONF_PERIOD_KEYS: Final = [CONF_START, CONF_END, CONF_DURATION]
 CONF_PROCESS_UNDEF_AS: Final = "process_undef_as"
+CONF_MAX_SOURCE_AGE: Final = "max_source_age"
+CONF_REQUIRE_ALL_SOURCES: Final = "require_all_sources"
 
 # Defaults
 DEFAULT_NAME: Final = "Average"

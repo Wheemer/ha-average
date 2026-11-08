@@ -14,12 +14,19 @@ from __future__ import annotations
 import logging
 import math
 import numbers
+from contextlib import suppress
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.helpers.entity_platform import (
+        AddConfigEntryEntitiesCallback,
+        AddEntitiesCallback,
+    )
     from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from _sha1 import sha1
@@ -28,19 +35,22 @@ import homeassistant.util.dt as dt_util
 import voluptuous as vol
 from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.components.recorder import get_instance, history
+from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
-    SensorEntity,
     SensorStateClass,
 )
 from homeassistant.components.water_heater import DOMAIN as WATER_HEATER_DOMAIN
 from homeassistant.components.weather import DOMAIN as WEATHER_DOMAIN
+from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
     ATTR_ICON,
     ATTR_UNIT_OF_MEASUREMENT,
     CONF_ENTITIES,
     CONF_NAME,
+    CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
     EVENT_HOMEASSISTANT_START,
     STATE_UNAVAILABLE,
@@ -55,10 +65,13 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.config_validation import PLATFORM_SCHEMA
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.group import expand_entity_ids
-from homeassistant.util import Throttle
+from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
+from homeassistant.helpers.template import Template
+from homeassistant.util import slugify
 from homeassistant.util.unit_conversion import TemperatureConverter
 from homeassistant.util.unit_system import TEMPERATURE_UNITS
 
@@ -74,16 +87,20 @@ from .const import (
     ATTR_TRENDING_TOWARDS,
     CONF_DURATION,
     CONF_END,
+    CONF_MAX_SOURCE_AGE,
+    CONF_REQUIRE_ALL_SOURCES,
     CONF_PERIOD_KEYS,
     CONF_PRECISION,
     CONF_PROCESS_UNDEF_AS,
     CONF_START,
     DEFAULT_NAME,
     DEFAULT_PRECISION,
+    DOMAIN,
     UPDATE_MIN_TIME,
 )
 
 _LOGGER = logging.getLogger(__name__)
+YAML_IMPORT_ISSUE_ID = "yaml_imported"
 
 
 def check_period_keys(conf: ConfigType) -> ConfigType:
@@ -103,6 +120,7 @@ PLATFORM_SCHEMA = vol.All(
     PLATFORM_SCHEMA.extend(
         {
             vol.Required(CONF_ENTITIES): cv.entity_ids,
+            vol.Optional(CONF_REQUIRE_ALL_SOURCES, default=False): cv.boolean,
             vol.Optional(CONF_UNIQUE_ID): cv.string,
             vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
             vol.Optional(CONF_START): cv.template,
@@ -110,6 +128,7 @@ PLATFORM_SCHEMA = vol.All(
             vol.Optional(CONF_DURATION): cv.positive_time_period,
             vol.Optional(CONF_PRECISION, default=DEFAULT_PRECISION): int,
             vol.Optional(CONF_PROCESS_UNDEF_AS): vol.Any(int, float),
+            vol.Optional(CONF_MAX_SOURCE_AGE): cv.positive_time_period,
         }
     ),
     check_period_keys,
@@ -120,15 +139,101 @@ PLATFORM_SCHEMA = vol.All(
 async def async_setup_platform(
     hass: HomeAssistant,
     config: ConfigType,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddEntitiesCallback,  # noqa: ARG001
     discovery_info: DiscoveryInfoType | None = None,  # noqa: ARG001
 ) -> None:
     """Set up platform."""
-    async_add_entities([AverageSensor(hass, config)])
+    await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_IMPORT},
+        data=config,
+    )
+    async_create_issue(
+        hass,
+        DOMAIN,
+        YAML_IMPORT_ISSUE_ID,
+        is_fixable=False,
+        is_persistent=True,
+        severity=IssueSeverity.WARNING,
+        translation_key="yaml_imported",
+        translation_placeholders={"name": "Average Sensor YAML configuration"},
+    )
+
+
+def _duration_from_selector(value: Any) -> timedelta | None:
+    """Convert a duration selector value to a timedelta."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, timedelta):
+        return value
+    if isinstance(value, dict):
+        return timedelta(
+            days=value.get("days", 0) or 0,
+            hours=value.get("hours", 0) or 0,
+            minutes=value.get("minutes", 0) or 0,
+            seconds=value.get("seconds", 0) or 0,
+            milliseconds=value.get("milliseconds", 0) or 0,
+        )
+    return value
+
+
+def _entry_unique_id(
+    hass: HomeAssistant, options: Mapping[str, Any], entry_id: str
+) -> str:
+    """Return the sensor unique ID for a config entry."""
+    if unique_id := options.get(CONF_UNIQUE_ID):
+        return unique_id
+
+    legacy_unique_id = slugify(options[CONF_NAME])
+    entity_id = er.async_get(hass).async_get_entity_id(
+        SENSOR_DOMAIN,
+        DOMAIN,
+        legacy_unique_id,
+    )
+    if entity_id:
+        return legacy_unique_id
+
+    return entry_id
+
+
+def _entry_config(hass: HomeAssistant, config_entry: ConfigEntry) -> ConfigType:
+    """Convert a config entry into AverageSensor config."""
+    options = {**config_entry.data, **config_entry.options}
+    config: dict[str, Any] = {
+        CONF_NAME: options[CONF_NAME],
+        CONF_ENTITIES: options[CONF_ENTITIES],
+        CONF_UNIQUE_ID: _entry_unique_id(hass, options, config_entry.entry_id),
+        CONF_PRECISION: int(options.get(CONF_PRECISION, DEFAULT_PRECISION)),
+        CONF_REQUIRE_ALL_SOURCES: options.get(CONF_REQUIRE_ALL_SOURCES, False),
+    }
+
+    for key in (CONF_START, CONF_END):
+        value = options.get(key)
+        if value:
+            config[key] = Template(value, hass)
+
+    for key in (CONF_DURATION, CONF_MAX_SOURCE_AGE, CONF_SCAN_INTERVAL):
+        duration = _duration_from_selector(options.get(key))
+        if duration is not None:
+            config[key] = duration
+
+    if (undef := options.get(CONF_PROCESS_UNDEF_AS)) is not None:
+        config[CONF_PROCESS_UNDEF_AS] = undef
+
+    return config
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Set up Average Sensor from a config entry."""
+    async_add_entities([AverageSensor(hass, _entry_config(hass, config_entry))])
 
 
 # pylint: disable=too-many-instance-attributes
-class AverageSensor(SensorEntity):
+class AverageSensor(RestoreSensor):
     """Implementation of an Average sensor."""
 
     _unrecorded_attributes = frozenset(
@@ -162,6 +267,10 @@ class AverageSensor(SensorEntity):
         self._period = self.start = self.end = None
         self._precision = config.get(CONF_PRECISION, DEFAULT_PRECISION)
         self._undef = config.get(CONF_PROCESS_UNDEF_AS)
+        self._require_all_sources = config.get(CONF_REQUIRE_ALL_SOURCES, False)
+        self._max_source_age = config.get(CONF_MAX_SOURCE_AGE)
+        self._update_interval = config.get(CONF_SCAN_INTERVAL, UPDATE_MIN_TIME)
+        self._last_update = None
         self._temperature_mode = None
         self._actual_end = None
 
@@ -210,19 +319,37 @@ class AverageSensor(SensorEntity):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
+        if self._require_all_sources:
+            now = dt_util.utcnow()
+            if not self.sources:
+                return False
+            for entity_id in self.sources:
+                state = self.hass.states.get(entity_id)
+                if state is None or self._is_source_stale(state, now):
+                    return False
+                value = self._get_temperature(state) if self._temperature_mode else state.state
+                try:
+                    if not math.isfinite(float(value)):
+                        return False
+                except (TypeError, ValueError):
+                    return False
+            if self.available_sources != self.count_sources:
+                return False
         return self.available_sources > 0 and self._has_state(self._attr_native_value)
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
         """Return entity specific state attributes."""
         return {
-            attr: getattr(self, attr)
-            for attr in ATTR_TO_PROPERTY
-            if getattr(self, attr) is not None
+            CONF_REQUIRE_ALL_SOURCES: self._require_all_sources,
+            **{attr: getattr(self, attr) for attr in ATTR_TO_PROPERTY
+               if getattr(self, attr) is not None},
         }
 
     async def async_added_to_hass(self) -> None:
         """Register callbacks."""
+        startup_fired = False
+        await self._async_restore_previous_state()
 
         # pylint: disable=unused-argument
         @callback
@@ -230,22 +357,83 @@ class AverageSensor(SensorEntity):
             """Handle device state changes."""
             last_state = self._attr_native_value
             await self._async_update_state()
-            if last_state != self._attr_native_value:
+            if self._require_all_sources or last_state != self._attr_native_value:
                 self.async_schedule_update_ha_state(force_refresh=True)
 
         # pylint: disable=unused-argument
         @callback
         async def async_sensor_startup(event: Event) -> None:  # noqa: ARG001
             """Update template on startup."""
+            nonlocal startup_fired
+            startup_fired = True
+
             if self._has_period:
                 self.async_schedule_update_ha_state(force_refresh=True)
             else:
-                async_track_state_change_event(
-                    self.hass, self.sources, async_sensor_state_listener
+                self.async_on_remove(
+                    async_track_state_change_event(
+                        self.hass, self.sources, async_sensor_state_listener
+                    )
                 )
                 await async_sensor_state_listener(Event("startup"))
 
-        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, async_sensor_startup)
+        if self.hass.is_running:
+            await async_sensor_startup(Event("reload"))
+        else:
+            remove_startup_listener = self.hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_START, async_sensor_startup
+            )
+
+            @callback
+            def async_remove_startup_listener() -> None:
+                """Remove startup listener if it has not fired yet."""
+                if not startup_fired:
+                    remove_startup_listener()
+
+            self.async_on_remove(async_remove_startup_listener)
+
+    async def _async_restore_previous_state(self) -> None:
+        """Restore the last known state until the next refresh completes."""
+        last_sensor_data = await self.async_get_last_sensor_data()
+        last_state = await self.async_get_last_state()
+
+        if last_sensor_data is not None:
+            native_value = last_sensor_data.native_value
+            native_unit = last_sensor_data.native_unit_of_measurement
+        elif last_state is not None:
+            native_value = last_state.state
+            native_unit = last_state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+        else:
+            return
+
+        if not self._has_state(str(native_value)):
+            return
+
+        with suppress(TypeError, ValueError):
+            native_value = float(native_value)
+
+        self._attr_native_value = native_value
+        self._attr_native_unit_of_measurement = native_unit
+
+        if self._attr_native_unit_of_measurement in TEMPERATURE_UNITS:
+            self._temperature_mode = True
+            self._attr_device_class = SensorDeviceClass.TEMPERATURE
+
+        if last_state is not None:
+            self.available_sources = last_state.attributes.get(
+                ATTR_AVAILABLE_SOURCES, self.count_sources
+            )
+            self.count = last_state.attributes.get(ATTR_COUNT, self.count)
+            self.count_sources = last_state.attributes.get(
+                ATTR_COUNT_SOURCES, self.count_sources
+            )
+            self.min_value = last_state.attributes.get(ATTR_MIN_VALUE)
+            self.max_value = last_state.attributes.get(ATTR_MAX_VALUE)
+            self.trending_towards = last_state.attributes.get(ATTR_TRENDING_TOWARDS)
+        else:
+            self.available_sources = self.count_sources
+
+        self.async_write_ha_state()
 
     @staticmethod
     def _has_state(state: str | None) -> bool:
@@ -323,11 +511,36 @@ class AverageSensor(SensorEntity):
                     self.max_datetime = state_dt_changed
         return state
 
-    @Throttle(UPDATE_MIN_TIME)
+    def _is_source_stale(self, state: State, now: datetime) -> bool:
+        """Return True if a source state is older than the configured age limit."""
+        if self._max_source_age is None:
+            return False
+
+        source_age = now - state.last_updated
+        if source_age <= self._max_source_age:
+            return False
+
+        _LOGGER.debug(
+            'Skipping stale source entity "%s"; last updated %s ago',
+            state.entity_id,
+            source_age,
+        )
+        return True
+
     async def async_update(self) -> None:
         """Update the sensor state if it needed."""
-        if self._has_period:
-            await self._async_update_state()
+        if not self._has_period:
+            return
+
+        now = dt_util.utcnow()
+        if (
+            self._last_update is not None
+            and now - self._last_update < self._update_interval
+        ):
+            return
+
+        self._last_update = now
+        await self._async_update_state()
 
     @staticmethod
     def handle_template_exception(exc: Exception, field: str) -> None:
@@ -502,7 +715,9 @@ class AverageSensor(SensorEntity):
             state = self.hass.states.get(entity_id)  # type: State
 
             if state is None:
-                _LOGGER.error('Unable to find an entity "%s"', entity_id)
+                _LOGGER.debug('Unable to find an entity "%s"', entity_id)
+                continue
+            if self._is_source_stale(state, now):
                 continue
 
             self._init_mode(state)
@@ -611,6 +826,7 @@ class AverageSensor(SensorEntity):
         self.min_value = self.max_value = None
         self.min_datetime = self.max_datetime = None
         self.trending_towards = None
+        now = dt_util.utcnow()
 
         # pylint: disable=too-many-nested-blocks
         for entity_id in self.sources:
@@ -619,7 +835,9 @@ class AverageSensor(SensorEntity):
             state = self.hass.states.get(entity_id)  # type: State
 
             if state is None:
-                _LOGGER.error('Unable to find an entity "%s"', entity_id)
+                _LOGGER.debug('Unable to find an entity "%s"', entity_id)
+                continue
+            if self._is_source_stale(state, now):
                 continue
 
             self._init_mode(state)

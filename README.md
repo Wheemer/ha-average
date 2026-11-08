@@ -2,6 +2,18 @@
 
 # Average Sensor for Home Assistant
 
+## Wheemer Fork
+
+Based on [Limych/ha-average](https://github.com/Limych/ha-average), with the original license and attribution retained. The upstream documentation follows below.
+
+This fork adds UI configuration and options editing, YAML import, source freshness limits, and an optional **Require all source sensors** setting. With that setting enabled, the average becomes unavailable whenever any source is missing, nonnumeric, nonfinite, or stale. A fallback value does not override this requirement. The setting defaults to off, preserving partial-source averaging for existing sensors.
+
+Common settings remain visible in the form. The collapsed **Advanced** section contains custom range templates, update interval, unavailable-source fallback, and maximum source age. Existing saved settings retain their flat format; opening the form does not migrate or discard them.
+
+Add `Wheemer/ha-average` as a custom integration repository in HACS to use this fork rather than the upstream repository. Configure sensors from **Settings > Devices & services > Helpers**. Existing YAML sensors are imported into UI configuration; remove their YAML definitions after verifying the import to avoid reimporting them.
+
+The current UI changes are tested against Home Assistant 2026.10. A Home Assistant restart is required after replacing Python component files; editing an existing sensor's options reloads that entry.
+
 [![GitHub Release][releases-shield]][releases]
 [![GitHub Activity][commits-shield]][commits]
 [![License][license-shield]](LICENSE.md)
