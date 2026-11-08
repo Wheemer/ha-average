@@ -355,6 +355,8 @@ class AverageSensor(RestoreSensor):
         @callback
         async def async_sensor_state_listener(event: Event) -> None:  # noqa: ARG001
             """Handle device state changes."""
+            if self._require_all_sources:
+                self.async_write_ha_state()
             last_state = self._attr_native_value
             await self._async_update_state()
             if self._require_all_sources or last_state != self._attr_native_value:
@@ -367,14 +369,15 @@ class AverageSensor(RestoreSensor):
             nonlocal startup_fired
             startup_fired = True
 
-            if self._has_period:
-                self.async_schedule_update_ha_state(force_refresh=True)
-            else:
+            if self._require_all_sources or not self._has_period:
                 self.async_on_remove(
                     async_track_state_change_event(
                         self.hass, self.sources, async_sensor_state_listener
                     )
                 )
+            if self._has_period:
+                self.async_schedule_update_ha_state(force_refresh=True)
+            else:
                 await async_sensor_state_listener(Event("startup"))
 
         if self.hass.is_running:

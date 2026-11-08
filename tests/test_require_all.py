@@ -1,10 +1,12 @@
 """Exercise the actual availability property without a Home Assistant runtime."""
 import ast
+import asyncio
 from datetime import datetime, timezone
 import math
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock, Mock
 
 source = Path(__file__).with_name('sensor.py')
 if not source.exists():
@@ -16,8 +18,35 @@ method.decorator_list = []
 ns = {'math': math, 'dt_util': SimpleNamespace(utcnow=lambda: datetime.now(timezone.utc))}
 exec(compile(ast.Module(body=[method], type_ignores=[]), 'sensor.py', 'exec'), ns)
 
+added = next(n for n in cls.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'async_added_to_hass')
+listeners = []
+def track(hass, sources, listener):
+    listeners.append(listener)
+    return lambda: None
+ns.update(callback=lambda func: func, Event=lambda name: name,
+          async_track_state_change_event=track)
+exec(compile(ast.Module(body=[added], type_ignores=[]), 'sensor.py', 'exec'), ns)
+
 
 class RequireAllTests(unittest.TestCase):
+    def test_history_window_subscribes_and_publishes_loss_before_recalculation(self):
+        listeners.clear()
+        calls = []
+        async def update():
+            calls.append('recalculate')
+        sensor = SimpleNamespace(
+            _require_all_sources=True, _has_period=True, sources=['top', 'bottom'],
+            hass=SimpleNamespace(is_running=True), _attr_native_value=35,
+            _async_restore_previous_state=AsyncMock(), async_on_remove=Mock(),
+            async_schedule_update_ha_state=Mock(),
+            async_write_ha_state=lambda: calls.append('publish'),
+            _async_update_state=update,
+        )
+        asyncio.run(ns['async_added_to_hass'](sensor))
+        self.assertEqual(len(listeners), 1)
+        asyncio.run(listeners[0](None))
+        self.assertEqual(calls, ['publish', 'recalculate'])
+
     def test_loss_nonfinite_stale_recovery_and_default(self):
         states = {'top': SimpleNamespace(state='40'), 'bottom': SimpleNamespace(state='30')}
         s = SimpleNamespace(
