@@ -365,7 +365,7 @@ class AverageSensor(RestoreSensor):
     @property
     def should_poll(self) -> bool:
         """Return the polling state."""
-        return self._has_period
+        return self._has_period or self._max_source_age is not None
 
     @property
     def available(self) -> bool:
@@ -506,9 +506,8 @@ class AverageSensor(RestoreSensor):
                 ATTR_AVAILABLE_SOURCES, self.count_sources
             )
             self.count = last_state.attributes.get(ATTR_COUNT, self.count)
-            self.count_sources = last_state.attributes.get(
-                ATTR_COUNT_SOURCES, self.count_sources
-            )
+            # Source count belongs to the current configuration, not restored data.
+            # The old diagnostics may describe a different source list.
             self.min_value = last_state.attributes.get(ATTR_MIN_VALUE)
             self.max_value = last_state.attributes.get(ATTR_MAX_VALUE)
             self.trending_towards = last_state.attributes.get(ATTR_TRENDING_TOWARDS)
@@ -646,12 +645,12 @@ class AverageSensor(RestoreSensor):
 
     async def async_update(self) -> None:
         """Update the sensor state if it needed."""
-        if (
-            self._stopping
-            or self.hass.is_stopping
-            or not self._has_period
-            or self._update_in_progress
-        ):
+        if self._stopping or self.hass.is_stopping or self._update_in_progress:
+            return
+
+        if not self._has_period:
+            if self._max_source_age is not None:
+                self._update_state_no_period()
             return
 
         now = dt_util.utcnow()
@@ -1051,8 +1050,9 @@ class AverageSensor(RestoreSensor):
         )
 
     def _history_metadata_signature(self) -> tuple[tuple[Any, ...], ...]:
-        """Detect late source units/classes before accepting a cached history result."""
+        """Detect source metadata and freshness changes before reusing history."""
         signature = [(self.hass.config.units.temperature_unit,)]
+        now = dt_util.utcnow()
         keys = (
             ATTR_DEVICE_CLASS,
             ATTR_UNIT_OF_MEASUREMENT,
@@ -1069,6 +1069,7 @@ class AverageSensor(RestoreSensor):
             signature.append(
                 (
                     entity_id,
+                    self._is_source_stale(state, now),
                     *(state.attributes.get(key) for key in keys),
                     state.attributes.get(f"{attribute}_unit") if attribute else None,
                 )

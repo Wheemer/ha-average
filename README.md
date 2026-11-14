@@ -201,7 +201,10 @@ recreate the entry to switch configuration methods.
 You can also keep managing a sensor from YAML. Leave its definition active and
 make its changes there: active YAML is reimported on startup or YAML reload and
 may overwrite later UI edits. Use one configuration source for each sensor.
-Remove unwanted entries explicitly through **Devices & services**.
+After editing active YAML, the Average Sensor reload service or Quick Reload
+applies changed settings to the loaded entry. Unchanged definitions do not trigger
+an extra entry reload. As with a UI save, reloading a changed entry can briefly
+affect its availability. Remove unwanted entries explicitly through **Devices & services**.
 
 Do not change existing unique IDs or delete and recreate sensors as a migration
 shortcut. The historical `unique_id: __legacy__` setting remains supported for
@@ -369,6 +372,8 @@ weighting, retained data, and update timing differ.
 Check the source states, units, and **Require every source** setting.
 Inspect `sources` and `available_sources` to confirm which entities are involved.
 If a maximum source age is configured, check each source's `last_updated` time.
+Quiet-source expiry follows Home Assistant's normal polling cadence. Instantaneous
+sensors without an age limit remain event-driven.
 
 For history averages, confirm the sources are included in Recorder and that
 history exists for the requested period. Allow the configured update interval
