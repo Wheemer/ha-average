@@ -1,419 +1,322 @@
-*Please :star: this repo if you find it useful*
+<div align="center">
 
-# Average Sensor for Home Assistant
+<img src="custom_components/average/brand/icon@2x.png" width="120" alt="Average Sensor icon">
 
-## Wheemer Fork
+<h1>Average Sensor</h1>
 
-Based on [Limych/ha-average](https://github.com/Limych/ha-average), with the original license and attribution retained. The upstream documentation follows below.
+### Current and time-weighted averages for Home Assistant
 
-This fork adds UI configuration and options editing, YAML import, source freshness limits, and an optional **Require all source sensors** setting. With that setting enabled, the average becomes unavailable whenever any source is missing, nonnumeric, nonfinite, or stale. A fallback value does not override this requirement. The setting defaults to off, preserving partial-source averaging for existing sensors.
+[![HACS Custom](https://img.shields.io/badge/HACS-CUSTOM-FD7E14?style=for-the-badge&logo=home-assistant&logoColor=white&labelColor=555555)](https://hacs.xyz/)
+[![Home Assistant 2026.11+](https://img.shields.io/badge/HOME%20ASSISTANT-2026.11%2B-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white&labelColor=555555)](https://www.home-assistant.io/)
+[![GitHub Activity](https://img.shields.io/github/last-commit/Wheemer/ha-average/dev?style=for-the-badge&logo=github&logoColor=white&label=UPDATED&labelColor=555555&color=22C55E)](https://github.com/Wheemer/ha-average/commits/dev/)
+[![License](https://img.shields.io/badge/LICENSE-CC%20BY--NC--SA%204.0-64748B?style=for-the-badge&labelColor=555555)](LICENSE.md)
 
-Sources and **Require all source sensors** remain directly visible in the form. The collapsed **Advanced** section contains the averaging window, custom range templates, update interval, and decimal places. Legacy maximum-source-age and undefined-value settings remain supported and are preserved when editing options, but are not shown in the form. Existing saved settings retain their flat format; opening the form does not migrate or discard them. This version requires Home Assistant 2026.11 or newer.
+[Features](#features) • [Install](#install) • [Configure](#configure) • [YAML Examples](#yaml-examples) • [Options](#options-reference) • [Troubleshooting](#troubleshooting)
 
-Add `Wheemer/ha-average` as a custom integration repository in HACS to use this fork rather than the upstream repository. Manage Average Sensor entries from **Settings > Devices & services > Integrations > Average Sensor**. UI helpers can also be created from the Helpers tab. Existing YAML sensors are imported into config entries; keep explicit unique IDs stable and verify the imported sensor before deciding whether to remove its YAML definition. Removing YAML does not automatically delete an imported entry or its recorder history.
+</div>
 
-The current UI changes are tested against Home Assistant 2026.10. A Home Assistant restart is required after replacing Python component files; editing an existing sensor's options reloads that entry.
+Average Sensor combines numeric readings from one or more sources into a single
+sensor. Use their current values, or calculate a time-weighted average over a
+rolling window or custom period.
 
-[![GitHub Release][releases-shield]][releases]
-[![GitHub Activity][commits-shield]][commits]
-[![License][license-shield]](LICENSE.md)
+Originally created by [Andrey “Limych” Khrolenok](https://github.com/Limych).
+This fork adds UI configuration, editable options, source availability controls,
+and fixes maintained in [Wheemer/ha-average](https://github.com/Wheemer/ha-average).
 
-[![hacs][hacs-shield]][hacs]
-[![Project Maintenance][maintenance-shield]][user_profile]
-[![Support me on Patreon][patreon-shield]][patreon]
+## Features
 
-[![Community Forum][forum-shield]][forum]
+| Feature | Description |
+| --- | --- |
+| **Current averages** | Combine the current readings of multiple sources; update when a source changes. |
+| **History averages** | Calculate each source's time-weighted mean over a period, then combine the available source means equally. |
+| **UI configuration** | Select sources, set availability behavior, and edit an existing sensor from Devices & services. |
+| **Source availability** | Optionally require every source to be valid instead of accepting a partial average. |
+| **Flexible periods** | Use a rolling duration or templates for period start and end. |
+| **Temperature sources** | Read temperature sensors and the current temperature of weather, climate, and water-heater entities. |
+| **Sensor metadata** | Expose units, device class where detected, measurement state class, source counts, extrema, and trend attributes. |
+| **YAML import** | Import existing definitions into config entries while retaining configured unique IDs. |
 
-_This sensor allows you to calculate the average state for one or more sensors over a specified period. Or just the average current state for one or more sensors, if you do not need historical data._
+## Requirements
 
-Initially it was written special for calculating of average temperature, but now it can calculate average of any numerical data.
+- **Home Assistant 2026.11 or newer** for the current development version.
+- One or more sources with compatible numeric readings and units.
+- **Recorder history** for the sources when using an averaging window or custom period.
 
-![Example][exampleimg]
+The development version currently identifies itself as `2.4.1-alpha`. Check
+[releases](https://github.com/Wheemer/ha-average/releases) for published packages;
+changes on `dev` are not automatically installed in Home Assistant.
 
-What makes this sensor different from others built into HA:
+## Install
 
-**Compare with the min-max sensor:**\
-This sensor in the mean mode produces exactly the same average value from several sensors. But, unlike our sensor, it cannot receive the current temperature data from a weather, climate and water heater entities.
+### HACS
 
-**Compare with statistics sensor:**\
-This sensor copes with the averaging of data over a certain period of time. However… 1) it cannot work with several sources at once (and can't receive temperature from weather, climate and water heater entities, like min-max sensor), 2) when calculating the average, it does not take into account how much time the temperature value was kept, 3) it has a limit on the number of values ​​it averages - if by chance there are more values, they will be dropped.
+[![Add this repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Wheemer&repository=ha-average&category=integration)
 
-> **_Note_**:\
-> You can find a real example of using this component in [my Home Assistant configuration](https://github.com/Limych/HomeAssistantConfiguration).
+If the button does not work:
 
-I also suggest you [visit the support topic][forum] on the community forum.
+1. Open **HACS > Custom repositories**.
+2. Add `https://github.com/Wheemer/ha-average` with category **Integration**.
+3. Download **Average Sensor**, choosing an available compatible version.
+4. Restart Home Assistant at a convenient time to load the installed code.
+5. Continue with [Configure](#configure).
 
-## Breaking changes
+If HACS does not offer a published version containing the desired changes, use
+the manual method below for the `dev` branch.
 
-* Since version 2.0.0 the mechanism for specifying the unique ID of sensors has been changed. To prevent duplicate sensors from being created, add option `unique_id: __legacy__` to the settings of already available sensors. For more information, see below.\
-  Another way is to manually delete all old sensors via Configuration > Entities. Then restart HA and all the _2’s were was the original sensors again complete with their history.\
-  [![My Entities](https://my.home-assistant.io/badges/entities.svg)](https://my.home-assistant.io/redirect/entities/)
-* Since version 1.3.0 the default sensor name is “Average” instead of “Average Temperature”
+### Manual
 
-## Known Limitations and Issues
+1. Download the [development branch](https://github.com/Wheemer/ha-average/archive/refs/heads/dev.zip), or a published release.
+2. Copy the complete `custom_components/average` directory into your Home Assistant configuration directory:
 
-* Due to the fact that HA does not store in history the temperature units of measurement for weather, climate and water heater entities, the average sensor always assumes that their values ​​are specified in the same units that are now configured in HA globally.
+   ```text
+   config/
+   └── custom_components/
+       └── average/
+           ├── brand/
+           ├── translations/
+           ├── __init__.py
+           ├── config_flow.py
+           ├── manifest.json
+           ├── sensor.py
+           └── ...
+   ```
 
-## Installation
+3. Restart Home Assistant at a convenient time, then configure the integration.
 
-### Install from HACS (recommended)
+The upstream integration and this fork both use the domain `average`. Install
+one implementation at a time. Back up an existing installation before replacing
+its files, and keep its entity IDs, unique IDs, and config entries intact.
 
-1. Have [HACS][hacs] installed, this will allow you to easily manage and track updates.
-1. Search in HACS for "Average" integration or just press the button below:\
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)][hacs-repository]
-1. Click Install below the found integration.
+## Configure
 
-... then if you want to use `configuration.yaml` to configure sensor...
-1. Add `average` sensor to your `configuration.yaml` file. See configuration examples below.
-1. Restart Home Assistant
+1. Open **Settings > Devices & services > Integrations**.
+2. Select **Add integration** and search for **Average Sensor**.
+3. Enter a name and choose the source entities.
+4. Choose whether to **Require every source**.
+5. Open **Advanced** if you need an averaging window, custom period, update interval, or precision.
+6. Save the sensor.
 
-### Manual installation
+To edit an existing average, open its entry under **Average Sensor** and select
+**Configure**. Saving options reloads that entry, so consumers may see a brief
+availability change. Editing options does not require a full Home Assistant restart.
 
-1. Using the tool of choice open the directory (folder) for your HA configuration (where you find `configuration.yaml`).
-1. If you do not have a `custom_components` directory (folder) there, you need to create it.
-1. In the `custom_components` directory (folder) create a new folder called `average`.
-1. Download file `average.zip` from the [latest release section][releases-latest] in this repository.
-1. Extract _all_ files from this archive you downloaded in the directory (folder) you created.
+### Source availability
 
-... then if you want to use `configuration.yaml` to configure sensor...
-1. Add `average` sensor to your `configuration.yaml` file. See configuration examples below.
-1. Restart Home Assistant
+**Require every source** is directly visible in the main form and defaults
+to **off**.
 
-### Configuration Examples
+| Setting | Behavior |
+| --- | --- |
+| **Off** | Use the sources that provide usable values for the calculation. The average is unavailable when no usable values remain. |
+| **On** | Mark the average unavailable if any required source is missing, unknown, unavailable, nonnumeric, nonfinite, or older than a configured source-age limit. |
 
-To measure the average of current values from multiple sources:
+Strict history averages publish source loss immediately. History recalculation
+still respects the update interval. Valid source readings allow recovery; an
+undefined-value fallback never overrides the strict source requirement.
+
+For averages used by automations or control systems, choose availability behavior
+that reflects whether a partial reading is acceptable.
+
+### Advanced settings
+
+| Setting | Purpose |
+| --- | --- |
+| **Averaging window** | Use recorded history for a fixed duration. Leave unset for a current-value average. |
+| **Start / end time templates** | Use templates for a custom calculation period. |
+| **History update interval** | Minimum interval between history refreshes; defaults to 20 seconds. Actual refresh timing also depends on Home Assistant's polling schedule. |
+| **Decimal places** | Decimal places used to round the result; defaults to 2. |
+
+Maximum-source-age and undefined-value controls are supported through YAML and
+existing stored settings. They are preserved when editing options but are not
+shown in the normal form.
+
+## YAML Examples
+
+YAML remains supported as an import path. Definitions are added under `sensor:`.
+Keep a stable, explicit `unique_id` for an existing sensor.
+
+### Current room temperature
+
 ```yaml
-# Example configuration.yaml entry
 sensor:
   - platform: average
-    name: 'Average Temperature'
+    name: Room Average Temperature
+    unique_id: room_average_temperature
     entities:
-      - weather.gismeteo
-      - sensor.owm_temperature
-      - sensor.dark_sky_temperature
+      - sensor.room_temperature_a
+      - sensor.room_temperature_b
 ```
 
-To measure the average of all values of a single source over a period:
+### Rolling average with every source required
+
 ```yaml
-# Example configuration.yaml entry
 sensor:
   - platform: average
-    name: 'Average Temperature'
+    name: Temperature Average Last 15 Minutes
+    unique_id: temperature_average_last_15_minutes
+    entities:
+      - sensor.room_temperature_a
+      - sensor.room_temperature_b
+    require_all_sources: true
     duration:
-      days: 1
-    entities:
-      - sensor.gismeteo_temperature
+      minutes: 15
+    scan_interval:
+      seconds: 30
+    precision: 2
 ```
 
-or you can combine this variants for some reason.
-
-<p align="center">* * *</p>
-I put a lot of work into making this repo and component available and updated to inspire and help others! I will be glad to receive thanks from you — it will give me new strength and add enthusiasm:
-<p align="center"><a href="https://www.patreon.com/join/limych?" target="_blank"><img src="http://khrolenok.ru/support_patreon.png" alt="Patreon" width="250" height="48"></a></p>
-
-| Bitcoin                                                                                                                                                                                                                  | Ethereum                                                                                                                         | Monero                                                                                                                                                                              |
-|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| <a href="https://sochain.com/address/BTC/16yfCfz9dZ8y8yuSwBFVfiAa3CNYdMh7Ts" target="_blank"><img alt="Bitcoin" src="http://khrolenok.ru/support_btc.png" width="200"/></a><pre>16yfCfz9dZ8y8yuSwBFVfiAa3CNYdMh7Ts</pre> | <img alt="Ethereum" src="http://khrolenok.ru/support_eth.png" width="200"/><pre>0x9FB9429f9A85Fa2395Bb59e50452F64977435d61</pre> | <img alt="Monero" src="http://khrolenok.ru/support_xmr.png" width="200"/><pre>48Kt2ksKYxHg46T5sJ7feBXtndHhxk1JgYJwtwGG8Jb7asNFShRwUDtFgX2UvVThXa5GGyGbMCfNJX7YwFZBRDX43q4mT83</pre> |
-
-### Configuration Variables
-
-**entities**:\
-  _(list) (Required)_\
-  A list of temperature sensor entity IDs.
-
-> **_Note_**:\
-> You can use weather provider, climate and water heater entities as a data source. For that entities sensor use values of current temperature.
-
-> **_Note_**:\
-> You can use groups of entities as a data source. These groups will be automatically expanded to individual entities.
-
-**unique_id**\
-  _(string) (Optional)_\
-  An ID that uniquely identifies this sensor. Set this to a unique value to allow customization through the UI.
-
-> **_Note_**:\
-> If you used the component version 1.4.0 or earlier, you can specify the special value `__legacy__`, so that no duplicates of already existing sensors are created.\
-> The use of this special value in newly created sensors is not recommended.
->
-> Another way is to manually delete all old sensors via Configuration > Entities. Then restart HA and all the _2’s were was the original sensors again complete with their history.\
-  [![My Entities](https://my.home-assistant.io/badges/entities.svg)](https://my.home-assistant.io/redirect/entities/)
-
-
-**name**:\
-  _(string) (Optional)_\
-  Name to use in the frontend.\
-  _Default value: "Average"_
-
-**start**:\
-  _(template) (Optional)_\
-  When to start the measure (timestamp or datetime).
-
-**end**:\
-  _(template) (Optional)_\
-  When to stop the measure (timestamp or datetime).
-
-**duration**:\
-  _(time) (Optional)_\
-  Duration of the measure.
-
-**precision**:\
-  _(number) (Optional)_\
-  The number of decimals to use when rounding the sensor state.\
-  _Default value: 2_
-
-**process_undef_as**:\
-  _(number) (Optional)_\
-  Process undefined values (unavailable, sensor undefined, etc.) as specified value.\
-  \
-  By default, undefined values are not included in the average calculation. Specifying this parameter allows you to calculate the average value taking into account the time intervals of the undefined sensor values.
-
-> **_Note_**:\
-> This parameter does not affect the calculation of the count, min and max attributes.
-
-### Average Sensor Attributes
-
-**start**:\
-  Timestamp of the beginning of the calculation period (if period was set).
-
-**end**:\
-  Timestamp of the end of the calculation period (if period was set).
-
-**sources**:\
-  Total expanded list of source sensors.
-
-**count_sources**:\
-  Total count of source sensors.
-
-**available_sources**:\
-  Count of available source sensors (for current calculation period).
-
-**count**:\
-  Total count of processed values of source sensors.
-
-**min_value**:\
-  Minimum value of processed values of source sensors.
-
-**min_datetime**:\
-  Date and time of minimum value of processed values of source sensors (if period was set).
-
-**max_value**:\
-  Maximum value of processed values of source sensors.
-
-**max_datetime**:\
-  Date and time of maximum value of processed values of source sensors (if period was set).
-
-**trending_towards**:\
-  The predicted value if monitored entities keep their current states for the remainder of the period. Requires "end" configuration variable to be set to actual end of period and not now().
-
-## Time periods
-
-The `average` integration will execute a measure within a precise time period. You should provide none, only `duration` (when period ends at now) or exactly 2 of the following:
-
-- When the period starts (`start` variable)
-- When the period ends (`end` variable)
-- How long is the period (`duration` variable)
-
-As `start` and `end` variables can be either datetimes or timestamps, you can configure almost any period you want.
-
-### Duration
-
-The duration variable is used when the time period is fixed.  Different syntaxes for the duration are supported, as shown below.
-
-  ```yaml
-  # 15 seconds
-  duration: 15
-  ```
-
-  ```yaml
-  # 6 hours
-  duration: 06:00
-  ```
-
-  ```yaml
-  # 1 minute, 30 seconds
-  duration: 00:01:30
-  ```
-
-  ```yaml
-  # 2 hours and 30 minutes
-  duration:
-    # supports seconds, minutes, hours, days
-    hours: 2
-    minutes: 30
-  ```
-
-<p align="center">* * *</p>
-I put a lot of work into making this repo and component available and updated to inspire and help others! I will be glad to receive thanks from you — it will give me new strength and add enthusiasm:
-<p align="center"><a href="https://www.patreon.com/join/limych?" target="_blank"><img src="http://khrolenok.ru/support_patreon.png" alt="Patreon" width="250" height="48"></a></p>
-
-| Bitcoin                                                                                                                                                                                                                  | Ethereum                                                                                                                         | Monero                                                                                                                                                                              |
-|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| <a href="https://sochain.com/address/BTC/16yfCfz9dZ8y8yuSwBFVfiAa3CNYdMh7Ts" target="_blank"><img alt="Bitcoin" src="http://khrolenok.ru/support_btc.png" width="200"/></a><pre>16yfCfz9dZ8y8yuSwBFVfiAa3CNYdMh7Ts</pre> | <img alt="Ethereum" src="http://khrolenok.ru/support_eth.png" width="200"/><pre>0x9FB9429f9A85Fa2395Bb59e50452F64977435d61</pre> | <img alt="Monero" src="http://khrolenok.ru/support_xmr.png" width="200"/><pre>48Kt2ksKYxHg46T5sJ7feBXtndHhxk1JgYJwtwGG8Jb7asNFShRwUDtFgX2UvVThXa5GGyGbMCfNJX7YwFZBRDX43q4mT83</pre> |
-
-### Examples
-
-Here are some examples of periods you could work with, and what to write in your `configuration.yaml`:
-
-**Last 5 minutes**: ends right now, last 5 minutes.
+### Average since midnight
 
 ```yaml
+sensor:
+  - platform: average
+    name: Outside Temperature Today
+    unique_id: outside_temperature_today
+    entities:
+      - sensor.outside_temperature
+    start: "{{ now().replace(hour=0, minute=0, second=0, microsecond=0) }}"
+    end: "{{ now() }}"
+```
+
+### Existing YAML installations
+
+YAML definitions are imported into config entries. Verify the resulting sensor
+and its identity before deciding whether to remove a definition. Removing YAML
+does **not** automatically delete the imported entry or its recorder history.
+Remove unwanted entries explicitly through **Devices & services**.
+
+Do not change existing unique IDs or delete and recreate sensors as a migration
+shortcut. The historical `unique_id: __legacy__` setting remains supported for
+installations already using it; it is not recommended for new sensors.
+
+## Options Reference
+
+| YAML option | Default | Description |
+| --- | --- | --- |
+| `entities` | Required | Source entity IDs. YAML groups are expanded into their members when the sensor is created. |
+| `name` | `Average` | Sensor name. |
+| `unique_id` | Optional | Stable sensor identity; preserve existing values. |
+| `require_all_sources` | `false` | Require every source to be valid. |
+| `duration` | Unset | Averaging window as a time-period mapping, seconds, or a quoted duration string. |
+| `start` / `end` | Unset | Templates returning datetimes or timestamps. |
+| `scan_interval` | 20 seconds | Minimum interval between history refreshes. |
+| `precision` | `2` | Decimal places for the result. |
+| `max_source_age` | Unset | Exclude readings whose `last_updated` is older than this duration; strict mode becomes unavailable. |
+| `process_undef_as` | Unset | Substitute a configured number for undefined values during calculation. Does not bypass strict availability. |
+| `ignore_undef` | `false` | Allow a history average over valid recorded intervals when the latest recorded value is undefined. |
+| `calculate_to_now_undef` | `false` | Carry the last valid reading across undefined intervals through the window end. Requires `ignore_undef: true`. |
+
+### Time periods
+
+Use one of these combinations:
+
+- No period options: average current values.
+- `duration` alone: a rolling window ending now.
+- `start` and `end`: an explicit period.
+- `start` and `duration`, or `end` and `duration`: calculate the remaining boundary.
+
+A lone `start` or `end`, or all three period options together, is invalid.
+Durations must be positive. In the UI, put these values under **Advanced**.
+
+```yaml
+# Last 5 minutes
 duration:
   minutes: 5
 ```
 
-**Today**: starts at 00:00 of the current day and ends right now.
+Or use a quoted duration string:
 
 ```yaml
-start: '{{ now().replace(hour=0).replace(minute=0).replace(second=0) }}'
-end: '{{ now() }}'
+# A fixed 2-hour, 30-minute window
+duration: "02:30:00"
 ```
 
-**Yesterday**: ends today at 00:00, lasts 24 hours.
+### Undefined history values
 
-```yaml
-end: '{{ now().replace(hour=0).replace(minute=0).replace(second=0) }}'
-duration:
-  hours: 24
-```
+By default, undefined intervals are not assigned an invented numeric value. The
+optional gap controls apply to history calculations:
 
-**This morning (06:00–11:00)**: starts today at 6, lasts 5 hours.
+- `ignore_undef: true` can retain an average over valid recorded intervals even when the latest recorded reading is undefined.
+- Adding `calculate_to_now_undef: true` assumes the last valid reading continues through subsequent gaps. Enable this only when that assumption is appropriate for the source.
 
-```yaml
-start: '{{ now().replace(hour=6).replace(minute=0).replace(second=0) }}'
-duration:
-  hours: 5
-```
+Neither option invents a reading before the first valid value. If no usable data
+exists, the sensor remains unavailable. Neither option overrides **Require all
+source sensors**.
 
-**Current week**: starts last Monday at 00:00, ends right now.
+## Sensor Attributes
 
-Here, last Monday is _today_ as a timestamp, minus 86400 times the current weekday (86400 is the number of seconds in one day, the weekday is 0 on Monday, 6 on Sunday).
+| Attribute | Meaning |
+| --- | --- |
+| `sources` | Expanded source entity IDs. |
+| `count_sources` | Number of configured sources. |
+| `available_sources` | Sources contributing numeric values to the last calculation. Strict availability also checks current source states. |
+| `count` | Numeric values processed, including history boundary values; not a number of days or elapsed seconds. |
+| `start` / `end` | Boundaries of the calculated history period, when configured. |
+| `min_value` / `max_value` | Lowest and highest processed values. |
+| `min_datetime` / `max_datetime` | Times associated with those extrema for a history calculation. |
+| `trending_towards` | Projection to the configured period end if sources keep their last readings. Useful when the end is in the future. |
 
-```yaml
-start: '{{ as_timestamp( now().replace(hour=0).replace(minute=0).replace(second=0) ) - now().weekday() * 86400 }}'
-end: '{{ now() }}'
-```
+## Limitations
 
-**Last 30 days**: ends today at 00:00, lasts 30 days. Easy one.
+- **History retention:** windows use raw recorder state history. Long-term statistics are not queried automatically. A monthly window needs the relevant raw history retained for that period.
+- **Large windows:** frequently changing sources can produce large queries. A longer update interval reduces frequency, but does not remove the cost of processing a large history.
+- **Temperature units:** weather, climate, and water-heater temperature attributes are interpreted in Home Assistant's configured temperature unit. Historical changes in those units are not reconstructed.
+- **Compatible inputs:** use readings that represent the same quantity with compatible units. This integration does not perform arbitrary unit normalization for non-temperature values.
+- **Consumption totals:** averaging an increasing meter reading gives its average level, not consumption per day. Use consumption differences or an appropriate utility meter for that quantity.
+- **Other aggregations:** weighted source contributions, medians, trimmed averages, and automatic area/label selection are not currently implemented.
 
-```yaml
-end: '{{ now().replace(hour=0).replace(minute=0).replace(second=0) }}'
-duration:
-  days: 30
-```
-
-**All your history** starts at timestamp = 0, and ends right now.
-
-```yaml
-start: '{{ 0 }}'
-end: '{{ now() }}'
-```
-
-> **_Note_**:\
-> The `Template Dev Tools` page of your home-assistant UI can help you check if the values for `start`, `end` or `duration` are correct. If you want to check if your period is right, just click on your component, the `start` and `end` attributes will show the start and end of the period, nicely formatted.\
-> [![Developer Tools: Templates](https://my.home-assistant.io/badges/developer_template.svg)](https://my.home-assistant.io/redirect/developer_template/)
-
-## Track updates
-
-You can automatically track new versions of this component and update it by [HACS][hacs].
+For a single current-value aggregate, Home Assistant also has built-in helpers.
+History and Filter integrations can produce different results because their
+weighting, retained data, and update timing differ.
 
 ## Troubleshooting
 
-To enable debug logs use this configuration:
+### The average is unavailable
+
+Check the source states, units, and **Require every source** setting.
+Inspect `sources` and `available_sources` to confirm which entities are involved.
+If a maximum source age is configured, check each source's `last_updated` time.
+
+For history averages, confirm the sources are included in Recorder and that
+history exists for the requested period. Allow the configured update interval
+for a new calculation.
+
+### A temperature unit is missing
+
+Confirm the sources expose a temperature device class or temperature unit.
+The fork can recognize temperature metadata that arrives after startup,
+including metadata from another average or a statistics sensor.
+
+### Enable debug logging
+
+Use Home Assistant's integration debug logging when available, or add:
+
 ```yaml
-# Example configuration.yaml entry
 logger:
   default: info
   logs:
     custom_components.average: debug
 ```
-... then restart HA.
 
-## Contributions are welcome!
+Report problems in [this fork's issue tracker](https://github.com/Wheemer/ha-average/issues).
+Include your Home Assistant version, integration version, relevant configuration,
+and the complete traceback. Remove credentials and private installation details.
 
-This is an active open-source project. We are always open to people who want to
-use the code or contribute to it.
+## Development
 
-We have set up a separate document containing our
-[contribution guidelines](CONTRIBUTING.md).
+See the [test guide](tests/README.md),
+[contribution guidelines](CONTRIBUTING.md), and
+[upstream review and backlog](docs/upstream-review.md).
 
-Thank you for being involved! :heart_eyes:
+Isolated test results do not establish that a particular live installation has
+completed a shutdown without errors. Repository updates, releases, and live
+installation updates are separate steps.
 
-## Authors & contributors
+## Credits And License
 
-The original setup of this component is by [Andrey "Limych" Khrolenok](https://github.com/Limych).
+Based on [Limych/ha-average](https://github.com/Limych/ha-average), originally
+created by Andrey “Limych” Khrolenok. This fork retains the original attribution
+and incorporates contributions credited in its Git history.
 
-For a full list of all authors and contributors,
-check [the contributor's page][contributors].
-
-This Home Assistant custom component was created and is updated using the [HA-Blueprint template](https://github.com/Limych/ha-blueprint). You can use this template to maintain your own Home Assistant custom components.
-
-## License
-
-creative commons Attribution-NonCommercial-ShareAlike 4.0 International License
-
-See separate [license file](LICENSE.md) for full text.
-
-***
-
-[component]: https://github.com/Limych/ha-average
-[commits-shield]: https://img.shields.io/github/commit-activity/y/Limych/ha-average.svg?style=popout
-[commits]: https://github.com/Limych/ha-average/commits/dev
-[hacs-shield]: https://img.shields.io/badge/HACS-Default-orange.svg?style=popout
-[hacs]: https://hacs.xyz
-[hacs-repository]: https://my.home-assistant.io/redirect/hacs_repository/?owner=Limych&repository=ha-average&category=integration
-[exampleimg]: https://github.com/Limych/ha-average/raw/dev/example.png
-[forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=popout
-[forum]: https://community.home-assistant.io/t/average-sensor/111674
-[license]: https://github.com/Limych/ha-average/blob/main/LICENSE.md
-[license-shield]: https://img.shields.io/badge/license-Creative_Commons_BY--NC--SA_License-lightgray.svg?style=popout
-[maintenance-shield]: https://img.shields.io/badge/maintainer-Andrey%20Khrolenok%20%40Limych-blue.svg?style=popout
-[releases-shield]: https://img.shields.io/github/release/Limych/ha-average.svg?style=popout
-[releases]: https://github.com/Limych/ha-average/releases
-[releases-latest]: https://github.com/Limych/ha-average/releases/latest
-[user_profile]: https://github.com/Limych
-[report_bug]: https://github.com/Limych/ha-average/issues/new?template=bug_report.md
-[suggest_idea]: https://github.com/Limych/ha-average/issues/new?template=feature_request.md
-[contributors]: https://github.com/Limych/ha-average/graphs/contributors
-[patreon-shield]: https://img.shields.io/endpoint.svg?url=https%3A%2F%2Fshieldsio-patreon.vercel.app%2Fapi%3Fusername%3DLimych%26type%3Dpatrons&style=popout
-[patreon]: https://www.patreon.com/join/limych
-
-
-### Undefined history values
-
-The optional YAML settings `ignore_undef: true` and
-`calculate_to_now_undef: true` adapt upstream PR #261. Both default to false,
-preserving existing averaging behavior. `ignore_undef` permits a history-window
-average over valid recorded intervals when the latest recorded value is undefined.
-`calculate_to_now_undef` additionally carries the last valid value across undefined
-intervals through the window end; it requires `ignore_undef`. No value is invented
-before the first valid reading. With no valid recorded interval, the sensor stays
-unavailable. Neither setting overrides **Require all source sensors**. These
-legacy-style options are preserved by UI edits but are not added to the simple form.
-
-History-window source notifications publish strict availability immediately, while
-history refreshes respect the configured update interval. Instantaneous averages
-still update on source changes. Nonnumeric and nonfinite readings are omitted in
-partial mode; strict mode remains unavailable until every required source is valid.
-
-### Understanding the result
-
-A history-window Average Sensor calculates a time-weighted mean from recorder
-state history, rather than an average of event counts. `count` is the number of
-numeric values processed, including boundary values; it is not a number of days,
-valid seconds, or a divisor for a cumulative consumption sensor. To find daily
-consumption from an increasing total, use consumption differences and an appropriate
-utility meter rather than averaging the total's level (upstream #263).
-
-The averaging window must fit within the source's retained recorder history.
-Long-term statistics are not queried automatically (#223). Monthly windows may
-need longer raw-history retention. Configuring an update interval reduces query
-frequency, but does not make large histories free to process (#168/#222).
-
-Average Sensor supports a history window and polling interval; Home Assistant's
-Filter integration offers a chain of signal filters. Their outputs need not match
-because weighting, retained samples and update timing differ (#26). Choose according
-to the quantity and behavior needed rather than treating them as interchangeable.
-
-See [the upstream review and backlog](docs/upstream-review.md) for the status of
-all open upstream PRs and issues. Repository changes do not update a running Home
-Assistant installation automatically.
+Licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International (CC BY-NC-SA 4.0)**. See [LICENSE.md](LICENSE.md) for the full terms.
