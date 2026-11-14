@@ -8,4 +8,4 @@ pytest-cov>=3.0
 pytest-homeassistant==2026.11.0
 pytest-asyncio>=0.20
 tzdata
-ruff>=0.4
+ruff>=0.17.4
