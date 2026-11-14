@@ -8,9 +8,9 @@ Based on [Limych/ha-average](https://github.com/Limych/ha-average), with the ori
 
 This fork adds UI configuration and options editing, YAML import, source freshness limits, and an optional **Require all source sensors** setting. With that setting enabled, the average becomes unavailable whenever any source is missing, nonnumeric, nonfinite, or stale. A fallback value does not override this requirement. The setting defaults to off, preserving partial-source averaging for existing sensors.
 
-Common settings remain visible in the form. The collapsed **Advanced** section contains custom range templates, update interval, unavailable-source fallback, and maximum source age. Existing saved settings retain their flat format; opening the form does not migrate or discard them.
+Sources and **Require all source sensors** remain directly visible in the form. The collapsed **Advanced** section contains the averaging window, custom range templates, update interval, and decimal places. Legacy maximum-source-age and undefined-value settings remain supported and are preserved when editing options, but are not shown in the form. Existing saved settings retain their flat format; opening the form does not migrate or discard them. This version requires Home Assistant 2026.11 or newer.
 
-Add `Wheemer/ha-average` as a custom integration repository in HACS to use this fork rather than the upstream repository. Configure sensors from **Settings > Devices & services > Helpers**. Existing YAML sensors are imported into UI configuration; remove their YAML definitions after verifying the import to avoid reimporting them.
+Add `Wheemer/ha-average` as a custom integration repository in HACS to use this fork rather than the upstream repository. Manage Average Sensor entries from **Settings > Devices & services > Integrations > Average Sensor**. UI helpers can also be created from the Helpers tab. Existing YAML sensors are imported into config entries; keep explicit unique IDs stable and verify the imported sensor before deciding whether to remove its YAML definition. Removing YAML does not automatically delete an imported entry or its recorder history.
 
 The current UI changes are tested against Home Assistant 2026.10. A Home Assistant restart is required after replacing Python component files; editing an existing sensor's options reloads that entry.
 
@@ -376,3 +376,44 @@ See separate [license file](LICENSE.md) for full text.
 [contributors]: https://github.com/Limych/ha-average/graphs/contributors
 [patreon-shield]: https://img.shields.io/endpoint.svg?url=https%3A%2F%2Fshieldsio-patreon.vercel.app%2Fapi%3Fusername%3DLimych%26type%3Dpatrons&style=popout
 [patreon]: https://www.patreon.com/join/limych
+
+
+### Undefined history values
+
+The optional YAML settings `ignore_undef: true` and
+`calculate_to_now_undef: true` adapt upstream PR #261. Both default to false,
+preserving existing averaging behavior. `ignore_undef` permits a history-window
+average over valid recorded intervals when the latest recorded value is undefined.
+`calculate_to_now_undef` additionally carries the last valid value across undefined
+intervals through the window end; it requires `ignore_undef`. No value is invented
+before the first valid reading. With no valid recorded interval, the sensor stays
+unavailable. Neither setting overrides **Require all source sensors**. These
+legacy-style options are preserved by UI edits but are not added to the simple form.
+
+History-window source notifications publish strict availability immediately, while
+history refreshes respect the configured update interval. Instantaneous averages
+still update on source changes. Nonnumeric and nonfinite readings are omitted in
+partial mode; strict mode remains unavailable until every required source is valid.
+
+### Understanding the result
+
+A history-window Average Sensor calculates a time-weighted mean from recorder
+state history, rather than an average of event counts. `count` is the number of
+numeric values processed, including boundary values; it is not a number of days,
+valid seconds, or a divisor for a cumulative consumption sensor. To find daily
+consumption from an increasing total, use consumption differences and an appropriate
+utility meter rather than averaging the total's level (upstream #263).
+
+The averaging window must fit within the source's retained recorder history.
+Long-term statistics are not queried automatically (#223). Monthly windows may
+need longer raw-history retention. Configuring an update interval reduces query
+frequency, but does not make large histories free to process (#168/#222).
+
+Average Sensor supports a history window and polling interval; Home Assistant's
+Filter integration offers a chain of signal filters. Their outputs need not match
+because weighting, retained samples and update timing differ (#26). Choose according
+to the quantity and behavior needed rather than treating them as interchangeable.
+
+See [the upstream review and backlog](docs/upstream-review.md) for the status of
+all open upstream PRs and issues. Repository changes do not update a running Home
+Assistant installation automatically.

@@ -53,6 +53,7 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
     EVENT_HOMEASSISTANT_START,
+    EVENT_HOMEASSISTANT_STOP,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
@@ -85,13 +86,15 @@ from .const import (
     ATTR_START,
     ATTR_TO_PROPERTY,
     ATTR_TRENDING_TOWARDS,
+    CONF_CALCULATE_TO_NOW_UNDEF,
     CONF_DURATION,
     CONF_END,
+    CONF_IGNORE_UNDEF,
     CONF_MAX_SOURCE_AGE,
-    CONF_REQUIRE_ALL_SOURCES,
     CONF_PERIOD_KEYS,
     CONF_PRECISION,
     CONF_PROCESS_UNDEF_AS,
+    CONF_REQUIRE_ALL_SOURCES,
     CONF_START,
     DEFAULT_NAME,
     DEFAULT_PRECISION,
@@ -113,6 +116,9 @@ def check_period_keys(conf: ConfigType) -> ConfigType:
             + " or maximum 2 of the following: "
             + ", ".join(CONF_PERIOD_KEYS)
         )
+    if conf.get(CONF_CALCULATE_TO_NOW_UNDEF) and not conf.get(CONF_IGNORE_UNDEF):
+        msg = "calculate_to_now_undef requires ignore_undef"
+        raise vol.Invalid(msg)
     return conf
 
 
@@ -128,6 +134,8 @@ PLATFORM_SCHEMA = vol.All(
             vol.Optional(CONF_DURATION): cv.positive_time_period,
             vol.Optional(CONF_PRECISION, default=DEFAULT_PRECISION): int,
             vol.Optional(CONF_PROCESS_UNDEF_AS): vol.Any(int, float),
+            vol.Optional(CONF_IGNORE_UNDEF, default=False): cv.boolean,
+            vol.Optional(CONF_CALCULATE_TO_NOW_UNDEF, default=False): cv.boolean,
             vol.Optional(CONF_MAX_SOURCE_AGE): cv.positive_time_period,
         }
     ),
@@ -207,6 +215,9 @@ def _entry_config(hass: HomeAssistant, config_entry: ConfigEntry) -> ConfigType:
         CONF_REQUIRE_ALL_SOURCES: options.get(CONF_REQUIRE_ALL_SOURCES, False),
     }
 
+    for key in (CONF_IGNORE_UNDEF, CONF_CALCULATE_TO_NOW_UNDEF):
+        config[key] = options.get(key, False)
+
     for key in (CONF_START, CONF_END):
         value = options.get(key)
         if value:
@@ -267,10 +278,13 @@ class AverageSensor(RestoreSensor):
         self._period = self.start = self.end = None
         self._precision = config.get(CONF_PRECISION, DEFAULT_PRECISION)
         self._undef = config.get(CONF_PROCESS_UNDEF_AS)
+        self._ignore_undef = config.get(CONF_IGNORE_UNDEF, False)
+        self._calculate_to_now_undef = config.get(CONF_CALCULATE_TO_NOW_UNDEF, False)
         self._require_all_sources = config.get(CONF_REQUIRE_ALL_SOURCES, False)
         self._max_source_age = config.get(CONF_MAX_SOURCE_AGE)
         self._update_interval = config.get(CONF_SCAN_INTERVAL, UPDATE_MIN_TIME)
         self._last_update = None
+        self._stopping = False
         self._temperature_mode = None
         self._actual_end = None
 
@@ -327,7 +341,11 @@ class AverageSensor(RestoreSensor):
                 state = self.hass.states.get(entity_id)
                 if state is None or self._is_source_stale(state, now):
                     return False
-                value = self._get_temperature(state) if self._temperature_mode else state.state
+                value = (
+                    self._get_temperature(state)
+                    if self._temperature_mode
+                    else state.state
+                )
                 try:
                     if not math.isfinite(float(value)):
                         return False
@@ -342,23 +360,51 @@ class AverageSensor(RestoreSensor):
         """Return entity specific state attributes."""
         return {
             CONF_REQUIRE_ALL_SOURCES: self._require_all_sources,
-            **{attr: getattr(self, attr) for attr in ATTR_TO_PROPERTY
-               if getattr(self, attr) is not None},
+            **{
+                attr: getattr(self, attr)
+                for attr in ATTR_TO_PROPERTY
+                if getattr(self, attr) is not None
+            },
         }
 
     async def async_added_to_hass(self) -> None:
         """Register callbacks."""
         startup_fired = False
+        source_unsub = None
+        self._stopping = False
+
+        @callback
+        def async_stop_updates(_event: Event | None = None) -> None:
+            """Latch shutdown through CLOSE and remove the source listener."""
+            nonlocal source_unsub
+            self._stopping = True
+            if source_unsub is not None:
+                source_unsub()
+                source_unsub = None
+
+        self.async_on_remove(async_stop_updates)
+        self.async_on_remove(
+            self.hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STOP, async_stop_updates
+            )
+        )
         await self._async_restore_previous_state()
 
         # pylint: disable=unused-argument
         @callback
         async def async_sensor_state_listener(event: Event) -> None:  # noqa: ARG001
             """Handle device state changes."""
+            if self._stopping or self.hass.is_stopping:
+                return
             if self._require_all_sources:
                 self.async_write_ha_state()
             last_state = self._attr_native_value
-            await self._async_update_state()
+            if self._has_period:
+                await self.async_update()
+            else:
+                await self._async_update_state()
+            if self._stopping or self.hass.is_stopping:
+                return
             if self._require_all_sources or last_state != self._attr_native_value:
                 self.async_schedule_update_ha_state(force_refresh=True)
 
@@ -366,14 +412,14 @@ class AverageSensor(RestoreSensor):
         @callback
         async def async_sensor_startup(event: Event) -> None:  # noqa: ARG001
             """Update template on startup."""
-            nonlocal startup_fired
+            nonlocal startup_fired, source_unsub
+            if self._stopping or self.hass.is_stopping:
+                return
             startup_fired = True
 
             if self._require_all_sources or not self._has_period:
-                self.async_on_remove(
-                    async_track_state_change_event(
-                        self.hass, self.sources, async_sensor_state_listener
-                    )
+                source_unsub = async_track_state_change_event(
+                    self.hass, self.sources, async_sensor_state_listener
                 )
             if self._has_period:
                 self.async_schedule_update_ha_state(force_refresh=True)
@@ -493,8 +539,10 @@ class AverageSensor(RestoreSensor):
 
         try:
             state = float(state)
-        except ValueError:
-            _LOGGER.exception('Could not convert value "%s" to float', state)
+        except (TypeError, ValueError):
+            _LOGGER.debug('Ignoring nonnumeric source value "%s"', state)
+            return None
+        if not math.isfinite(state):
             return None
 
         self.count += 1
@@ -532,7 +580,7 @@ class AverageSensor(RestoreSensor):
 
     async def async_update(self) -> None:
         """Update the sensor state if it needed."""
-        if not self._has_period:
+        if self._stopping or self.hass.is_stopping or not self._has_period:
             return
 
         now = dt_util.utcnow()
@@ -664,11 +712,15 @@ class AverageSensor(RestoreSensor):
 
     async def _async_update_state(self) -> None:  # noqa: PLR0912, PLR0915
         """Update the sensor state."""
+        if self._stopping or self.hass.is_stopping:
+            return
         _LOGGER.debug('Updating sensor "%s"', self.name)
         p_period = self._period
 
         # Parse templates
         await self._async_update_period()
+        if self._stopping or self.hass.is_stopping:
+            return
 
         if self._period is None:
             self._update_state_no_period()
@@ -713,6 +765,9 @@ class AverageSensor(RestoreSensor):
 
         # pylint: disable=too-many-nested-blocks
         for entity_id in self.sources:
+            # A previous history query may have yielded through the stop event.
+            if self._stopping or self.hass.is_stopping:
+                return
             _LOGGER.debug('Processing entity "%s"', entity_id)
 
             state = self.hass.states.get(entity_id)  # type: State
@@ -769,12 +824,13 @@ class AverageSensor(RestoreSensor):
                         value += last_state * last_elapsed
                         elapsed += last_elapsed
 
-                    last_state = current_state
+                    if current_state is not None or not self._calculate_to_now_undef:
+                        last_state = current_state
                     last_time = current_time
 
                 # Count time elapsed between last history state and now
                 if last_state is None:
-                    value = None
+                    value = value / elapsed if self._ignore_undef and elapsed else None
                 else:
                     last_elapsed = end_ts - last_time
                     value += last_state * last_elapsed

@@ -73,3 +73,6 @@ ATTR_TO_PROPERTY: Final = [
 
 
 UPDATE_MIN_TIME: Final = timedelta(seconds=20)
+
+CONF_IGNORE_UNDEF: Final = "ignore_undef"
+CONF_CALCULATE_TO_NOW_UNDEF: Final = "calculate_to_now_undef"
