@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import voluptuous as vol
 from homeassistant.const import SERVICE_RELOAD
 from homeassistant.helpers.reload import async_reload_integration_platforms
+from homeassistant.helpers.schema_config_entry_flow import SchemaConfigFlowHandler
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -47,8 +48,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:  # noqa:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Average Sensor from a config entry."""
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    if not hasattr(SchemaConfigFlowHandler, "options_flow_reloads"):
+        entry.async_on_unload(entry.add_update_listener(_async_reload_options))
 
     return True
+
+
+async def _async_reload_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Apply UI changes on Core versions without schema-helper auto reload."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

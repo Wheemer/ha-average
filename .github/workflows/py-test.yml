@@ -4,6 +4,7 @@ on:
     branches: [dev]
   pull_request:
     branches: [dev]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
   schedule:
     - cron: '23 3 * * 1'
@@ -14,22 +15,35 @@ concurrency:
   cancel-in-progress: true
 jobs:
   checks:
-    name: Python checks
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: Python checks (${{ matrix.dependencies }})
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        dependencies: [fixtures, latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build isolated test environment
-        run: docker build --pull -f tests/Dockerfile -t average-ci .
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: 'requirements*.txt'
+      - name: Install maintained fixture baseline
+        run: python -m pip install -r requirements-dev.txt
+      - name: Test newer pytest-asyncio compatibility
+        if: matrix.dependencies == 'latest'
+        # This is an explicit forward-compatibility test. The other matrix job
+        # retains pytest-homeassistant's exact dependency pins.
+        run: python -m pip install --no-deps -r requirements-test-latest.txt
       - name: Ruff lint
-        run: docker run --rm --network none -v "$PWD:/work" average-ci -m ruff check .
+        run: python -m ruff check .
       - name: Ruff format
-        run: docker run --rm --network none -v "$PWD:/work" average-ci -m ruff format . --check
-      - name: Test package on native Home Assistant
+        run: python -m ruff format . --check
+      - name: Test package
         run: >-
-          docker run --rm --network none -v "$PWD:/work" average-ci
-          -m pytest -q --tb=short --show-capture=no --disable-warnings
-          --cov=custom_components.average --cov-report=term-missing
-          --maxfail=3
+          python -m pytest -n 2 --dist=loadfile -q --durations=10
+          --tb=short --show-capture=no --disable-warnings --maxfail=3

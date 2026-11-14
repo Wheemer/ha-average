@@ -11,11 +11,11 @@
     ],
     "config_flow": true,
     "dependencies": [],
-    "documentation": "https://github.com/Limych/ha-average",
+    "documentation": "https://github.com/Wheemer/ha-average",
     "iot_class": "calculated",
-    "issue_tracker": "https://github.com/Limych/ha-average/issues",
+    "issue_tracker": "https://github.com/Wheemer/ha-average/issues",
     "requirements": [
         "pip>=21.3.1"
     ],
-    "version": "2.4.1-alpha"
+    "version": "2.5.0"
 }

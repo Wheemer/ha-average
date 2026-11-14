@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 from hashlib import sha1
-from typing import TYPE_CHECKING, Any, cast
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, cast, get_type_hints
 
-import probatio
 from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.components.input_number import DOMAIN as INPUT_NUMBER_DOMAIN
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
@@ -54,6 +54,12 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
+
+# Use the schema library expected by this Core version's public form API.
+# Newer Core uses probatio; earlier supported Core versions use voluptuous.
+schema_lib = import_module(
+    get_type_hints(section.__init__)["schema"].__module__.split(".", 1)[0]
+)
 
 ERR_PERIOD_START_OR_END_WITHOUT_DURATION = "period_start_or_end_without_duration"
 ERR_TOO_MANY_PERIOD_OPTIONS = "too_many_period_options"
@@ -120,7 +126,7 @@ def _validate_period(user_input: dict[str, Any]) -> dict[str, Any]:
             error = "invalid_duration"
             try:
                 seconds = cv.time_period(user_input[key]).total_seconds()
-            except (ValueError, TypeError, probatio.Invalid) as err:
+            except (ValueError, TypeError, schema_lib.Invalid) as err:
                 raise SchemaFlowError(error) from err
             if seconds <= 0:
                 raise SchemaFlowError(error)
@@ -253,14 +259,16 @@ async def validate_options(
     return options
 
 
-ADVANCED_SCHEMA = probatio.Schema(
+ADVANCED_SCHEMA = schema_lib.Schema(
     {
-        probatio.Optional(CONF_DURATION): selector.DurationSelector(
+        schema_lib.Optional(CONF_DURATION): selector.DurationSelector(
             selector.DurationSelectorConfig(allow_negative=False)
         ),
-        probatio.Optional(CONF_START): selector.TemplateSelector(),
-        probatio.Optional(CONF_END): selector.TemplateSelector(),
-        probatio.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_SELECTOR): (
+        schema_lib.Optional(CONF_START): selector.TemplateSelector(),
+        schema_lib.Optional(CONF_END): selector.TemplateSelector(),
+        schema_lib.Optional(
+            CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_SELECTOR
+        ): (
             selector.DurationSelector(
                 selector.DurationSelectorConfig(
                     enable_day=False,
@@ -268,41 +276,47 @@ ADVANCED_SCHEMA = probatio.Schema(
                 )
             )
         ),
-        probatio.Optional(
+        schema_lib.Optional(
             CONF_PRECISION, default=DEFAULT_PRECISION
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(step=1, mode=selector.NumberSelectorMode.BOX)
         ),
-        probatio.Optional(CONF_WEIGHTS): selector.ObjectSelector(),
-        probatio.Optional(CONF_SOURCE_ATTRIBUTES): selector.ObjectSelector(),
-        probatio.Optional(CONF_MAX_SOURCE_AGE): selector.DurationSelector(
+        schema_lib.Optional(CONF_WEIGHTS): selector.ObjectSelector(),
+        schema_lib.Optional(CONF_SOURCE_ATTRIBUTES): selector.ObjectSelector(),
+        schema_lib.Optional(CONF_MAX_SOURCE_AGE): selector.DurationSelector(
             selector.DurationSelectorConfig(allow_negative=False)
         ),
-        probatio.Optional(CONF_PROCESS_UNDEF_AS): selector.NumberSelector(
+        schema_lib.Optional(CONF_PROCESS_UNDEF_AS): selector.NumberSelector(
             selector.NumberSelectorConfig(mode=selector.NumberSelectorMode.BOX)
         ),
-        probatio.Optional(CONF_IGNORE_UNDEF): selector.BooleanSelector(),
-        probatio.Optional(CONF_CALCULATE_TO_NOW_UNDEF): selector.BooleanSelector(),
+        schema_lib.Optional(CONF_IGNORE_UNDEF): selector.BooleanSelector(),
+        schema_lib.Optional(CONF_CALCULATE_TO_NOW_UNDEF): selector.BooleanSelector(),
     }
 )
 
-OPTIONS_SCHEMA = probatio.Schema(
+OPTIONS_SCHEMA = schema_lib.Schema(
     {
-        probatio.Required(CONF_ENTITIES): selector.EntitySelector(
+        schema_lib.Required(CONF_ENTITIES): selector.EntitySelector(
             selector.EntitySelectorConfig(
-                domain=SOURCE_DOMAINS, multiple=True, reorder=True
+                domain=SOURCE_DOMAINS,
+                multiple=True,
+                **(
+                    {"reorder": True}
+                    if "reorder" in selector.EntitySelectorConfig.__annotations__
+                    else {}
+                ),
             )
         ),
-        probatio.Optional(
+        schema_lib.Optional(
             CONF_REQUIRE_ALL_SOURCES, default=False
         ): selector.BooleanSelector(),
-        probatio.Optional("advanced"): section(ADVANCED_SCHEMA, {"collapsed": True}),
+        schema_lib.Optional("advanced"): section(ADVANCED_SCHEMA, {"collapsed": True}),
     }
 )
 
-CONFIG_SCHEMA = probatio.Schema(
+CONFIG_SCHEMA = schema_lib.Schema(
     {
-        probatio.Required(CONF_NAME, default=DEFAULT_NAME): selector.TextSelector(),
+        schema_lib.Required(CONF_NAME, default=DEFAULT_NAME): selector.TextSelector(),
     }
 ).extend(OPTIONS_SCHEMA.schema)
 
@@ -379,5 +393,8 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
         self.hass.config_entries.async_update_entry(
             entry, options=merged, title=self.async_config_entry_title(merged)
         )
-        if entry.state is ConfigEntryState.LOADED:
+        if entry.state is ConfigEntryState.LOADED and hasattr(
+            SchemaConfigFlowHandler, "options_flow_reloads"
+        ):
+            # Older Core uses the integration's entry update listener instead.
             self.hass.config_entries.async_schedule_reload(entry.entry_id)

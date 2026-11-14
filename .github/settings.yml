@@ -92,7 +92,7 @@ branches:
         # Required. Require branches to be up to date before merging.
         strict: true
         # Required. The list of status checks to require in order to merge into this branch.
-        contexts: ["Python checks", "Hassfest", "HACS", "Dependency review", "Analyze (python)", "Analyze (actions)"]
+        contexts: ["Python checks (fixtures)", "Python checks (latest)", "Hassfest", "HACS", "Dependency review", "Analyze (python)", "Analyze (actions)", "CodeQL"]
       # Required. Enforce all configured restrictions for administrators. Set to true to
       # enforce required status checks for repository administrators. Set to null to disable.
       enforce_admins: true

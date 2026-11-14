@@ -16,10 +16,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          version = json.loads(Path('custom_components/average/manifest.json').read_text())['version']
+          assert os.environ['RELEASE_TAG'].removeprefix('v') == version, 'Tag and manifest version differ'
+          PY
       - name: Package integration
         working-directory: custom_components/average
         run: zip -r "$RUNNER_TEMP/average.zip" . -x '__pycache__/*' '*.pyc'
+      - name: Include license and checksum
+        run: |
+          zip -j "$RUNNER_TEMP/average.zip" LICENSE.md
+          cd "$RUNNER_TEMP"
+          sha256sum average.zip > average.zip.sha256
       - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
-          files: ${{ runner.temp }}/average.zip
+          files: |
+            ${{ runner.temp }}/average.zip
+            ${{ runner.temp }}/average.zip.sha256
           generate_release_notes: true
