@@ -32,7 +32,7 @@ closed by us in July without upstream merge. Its fix is already in this fork.
 | [243](https://github.com/Limych/ha-average/issues/243) | Reproduced and fixed rounded-end caching of unavailable, partial and current-value-fallback results; these now retry at the configured interval instead of requiring a reload. Successful complete closed windows remain cached. Changed active YAML now reloads the affected loaded entry, including source edits with an explicit unique ID and non-identity option edits using a stable generated import ID. Unchanged YAML avoids needless entry reloads. Restored source counts no longer override the configured list, fixing strict-mode unavailability after a source-count edit. The native Quick Reload handler preserves identity and working source listeners with YAML active or commented out; other installation-specific causes remain unproven. No automatic deletion of imported entries. Import notices now direct users to verify identities/settings/history before commenting out YAML for UI management. |
 | [225](https://github.com/Limych/ha-average/issues/225) | Backlog: seasonal accumulated temperature is a separate aggregation, not the current arithmetic/time-weighted mean. |
 | [223](https://github.com/Limych/ha-average/issues/223) | Backlog: long-term statistics support; raw recorder retention limitation documented. No silent switch to hourly statistics. |
-| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Lazy recorder-state decoding now runs in the recorder executor, and cancelled refreshes cannot start replacement queries while their original SQL job is still running. Ordinary numeric history also omits unused attributes and their SQL join; completed source lists are released before the next query loads. A malformed-temperature history traceback storm is now also bounded to a first error and count summary per source/calculation. Database-specific query cost remains a follow-up. |
+| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Lazy recorder-state decoding now runs in the recorder executor, and cancelled refreshes cannot start replacement queries while their original SQL job is still running. Ordinary numeric history also omits unused attributes and their SQL join; completed source lists are released before the next query loads. A malformed-temperature history traceback storm is now also bounded to a first error and count summary per source/calculation. MariaDB and PostgreSQL query/lock/statement-timeout experiments now also cover the database paths. Entry reloads retain the pending-query guard across replacement entities; database-specific query duration remains workload dependent. |
 | [217](https://github.com/Limych/ha-average/issues/217) | Not reproduced on current Core: real native configuration checks finish for instantaneous, duration and template-range YAML, without creating entries/states. Bounded regression tests cover the path. The upstream reporter noted that a Core/integration update resolved their old hang; no speculative workaround added. |
 | [185](https://github.com/Limych/ha-average/issues/185) | Unit-based temperature detection and metadata recovery covered, including sources with statistics-style metadata. |
 | [184](https://github.com/Limych/ha-average/issues/184) | Backlog: hourly sampling changes averaging semantics and needs a separate explicit mode. |
@@ -269,3 +269,58 @@ original reporter's precise cause. Database-specific SQL delays remain workload
 dependent. No timeout controls, new modes, settings, sampling, defaults or IDs
 were introduced. Existing YAML and UI controls remain supported; no live
 installation was accessed or changed.
+
+
+## SQL backend, lock and reload follow-up (#168 / #222)
+
+A real options-flow regression reproduced a missing boundary in the per-entity
+pending-query guard: an options save or active YAML reload replaced the entity
+while its previous SQL job was still running, allowing a second job for the same
+entry. Pending jobs are now tracked by config-entry ID in the Home Assistant
+instance until the actual executor future completes. Replacement entities skip
+new queries while that entry's job is pending. Other entries are not serialized
+by this guard. Once the old job finishes, the latest settings are used on the
+next refresh; entry/entity/unique IDs and source listeners are retained normally.
+No entry ID is added to YAML or public UI options.
+
+Native tests perform two consecutive options saves or two actual YAML reloads
+while a real executor thread is blocked. They verify one pending job, stable
+identity, retained duration and recovery using the newest source after release.
+Both variants fail against the preceding implementation by submitting a second
+job during the blocked query. Query errors and cancellation guards remain in
+place, including the existing STOP protections.
+
+Additional native Core 2026.11.1 experiments used disposable MariaDB 11.4.13 and
+PostgreSQL 16.16 instances, with no published ports and no connection to a live
+Home Assistant database. Each backend contained 100,000 synthetic state changes
+with a 512-byte attribute payload. Timings are medians of three query-and-decode
+runs; traced allocation peaks were measured separately. These extend the earlier
+SQLite payload benchmark rather than measuring a new SQL-query algorithm.
+
+| Backend | Full metadata / both timestamps | Numeric metadata omitted | Required metadata retained |
+| --- | ---: | ---: | ---: |
+| MariaDB 11.4.13 | 1.3513 s | 0.8831 s | 1.2672 s |
+| PostgreSQL 16.16 | 1.0887 s | 0.6489 s | 1.0275 s |
+
+All paths returned all 100,000 points with the expected numeric mean. Numeric
+peak traced allocations fell from approximately 141 to 80 MiB on both backends;
+metadata-retaining paths remained approximately 136 MiB. These are local client
+query/decode measurements with a one-CPU database container, not timings for the
+original reporter's data, total update times or live-system guarantees.
+
+Real table locks were then held on each disposable backend while an integration
+query ran. A replacement entity for the same entry did not submit a second job;
+releasing the lock allowed normal recovery using the new source. Separate
+experiments imposed actual server statement timeouts (MariaDB session
+`max_statement_time`, PostgreSQL transaction-local `statement_timeout`). Their
+SQLAlchemy errors propagated, the pending-job registry cleared, and the next
+refresh recovered after unlocking. Those timeout settings existed only in the
+experiments, not in integration code or any live database.
+
+The integration continues to use Core's history APIs and does not create indexes,
+change database/session settings, cancel SQL threads or add its own query engine.
+Server locks, I/O latency and execution costs can still delay queries. No further
+backend-specific query defect or universal query-time bound was established by
+these experiments. YAML compatibility, UI controls, defaults, calculations and
+identities remain unchanged. The temporary database containers were removed
+after validation; no live installation was accessed.

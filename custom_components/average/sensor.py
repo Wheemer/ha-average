@@ -111,6 +111,7 @@ from .weights import normalize_weights
 _LOGGER = logging.getLogger(__name__)
 YAML_IMPORT_ISSUE_ID = "yaml_imported"
 HISTORY_PROCESSING_BATCH_SIZE = 512
+DATA_PENDING_HISTORY = f"{DOMAIN}_pending_history"
 
 
 def _materialized_history(  # noqa: PLR0913
@@ -301,7 +302,13 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Average Sensor from a config entry."""
-    async_add_entities([AverageSensor(hass, _entry_config(hass, config_entry))])
+    async_add_entities(
+        [
+            AverageSensor(
+                hass, _entry_config(hass, config_entry), entry_id=config_entry.entry_id
+            )
+        ]
+    )
 
 
 # pylint: disable=too-many-instance-attributes
@@ -322,7 +329,9 @@ class AverageSensor(RestoreSensor):
     )
 
     # pylint: disable=too-many-arguments
-    def __init__(self, hass: HomeAssistant, config: ConfigType) -> None:
+    def __init__(
+        self, hass: HomeAssistant, config: ConfigType, *, entry_id: str | None = None
+    ) -> None:
         """Initialize the sensor."""
         unique_id = config.get(CONF_UNIQUE_ID)
         start = config.get(CONF_START)
@@ -357,6 +366,7 @@ class AverageSensor(RestoreSensor):
         self._actual_end = None
 
         self.hass = hass
+        self._entry_id = entry_id
         self.sources = expand_entity_ids(hass, config.get(CONF_ENTITIES, []))
         self.count_sources = len(self.sources)
         self.available_sources = 0
@@ -682,13 +692,21 @@ class AverageSensor(RestoreSensor):
         )
         return True
 
+    @property
+    def _history_query_pending(self) -> bool:
+        """Include an earlier entity instance's SQL job during an entry reload."""
+        return self._pending_history_query is not None or (
+            self._entry_id is not None
+            and self._entry_id in self.hass.data.get(DATA_PENDING_HISTORY, {})
+        )
+
     async def async_update(self) -> None:
         """Update the sensor state if it needed."""
         if (
             self._stopping
             or self.hass.is_stopping
             or self._update_in_progress
-            or self._pending_history_query is not None
+            or self._history_query_pending
         ):
             return
 
@@ -892,11 +910,16 @@ class AverageSensor(RestoreSensor):
             )
         )
         self._pending_history_query = pending
+        shared = self.hass.data.setdefault(DATA_PENDING_HISTORY, {})
+        if self._entry_id is not None:
+            shared[self._entry_id] = pending
 
         @callback
         def query_done(future: Future) -> None:
             if self._pending_history_query is future:
                 self._pending_history_query = None
+            if self._entry_id is not None and shared.get(self._entry_id) is future:
+                del shared[self._entry_id]
 
         @callback
         def abandoned_query_done(future: Future) -> None:
@@ -917,11 +940,7 @@ class AverageSensor(RestoreSensor):
 
     async def _async_update_state(self) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         """Update the sensor state."""
-        if (
-            self._stopping
-            or self.hass.is_stopping
-            or self._pending_history_query is not None
-        ):
+        if self._stopping or self.hass.is_stopping or self._history_query_pending:
             return
         _LOGGER.debug('Updating sensor "%s"', self.name)
         self._temperature_conversion_errors.clear()
@@ -993,8 +1012,8 @@ class AverageSensor(RestoreSensor):
 
         # pylint: disable=too-many-nested-blocks
         for entity_id in self.sources:
-            # A previous history query may have yielded through the stop event.
-            if self._stopping or self.hass.is_stopping:
+            # A previous query/batch may have yielded through STOP or a reload.
+            if self._stopping or self.hass.is_stopping or self._history_query_pending:
                 return
             _LOGGER.debug('Processing entity "%s"', entity_id)
 
