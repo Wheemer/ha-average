@@ -7,6 +7,8 @@
 ### Current and time-weighted averages for Home Assistant
 
 [![HACS Custom](https://img.shields.io/badge/HACS-CUSTOM-FD7E14?style=for-the-badge&logo=home-assistant&logoColor=white&labelColor=555555)](https://hacs.xyz/)
+[![Release](https://img.shields.io/github/v/release/Wheemer/ha-average?style=for-the-badge)](https://github.com/Wheemer/ha-average/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Wheemer/ha-average/total?style=for-the-badge)](https://github.com/Wheemer/ha-average/releases)
 [![GitHub Activity](https://img.shields.io/github/last-commit/Wheemer/ha-average/dev?style=for-the-badge&logo=github&logoColor=white&label=UPDATED&labelColor=555555&color=22C55E)](https://github.com/Wheemer/ha-average/commits/dev/)
 [![License](https://img.shields.io/badge/LICENSE-CC%20BY--NC--SA%204.0-64748B?style=for-the-badge&labelColor=555555)](LICENSE.md)
 
@@ -41,7 +43,7 @@ Add `https://github.com/Wheemer/ha-average` as an **Integration** custom reposit
 
 ### Manual
 
-Download a [release](https://github.com/Wheemer/ha-average/releases) and copy `custom_components/average` into your Home Assistant configuration directory. Restart Home Assistant to load the integration.
+Download `average.zip` from the [latest release](https://github.com/Wheemer/ha-average/releases/latest). Extract its contents into `config/custom_components/average/`. Restart Home Assistant to load the integration.
 
 This fork and the original integration both use the `average` domain. Install one implementation at a time and preserve existing entity IDs and unique IDs when switching.
 
