@@ -22,14 +22,24 @@
               "end": "End time template",
               "scan_interval": "History update interval",
               "precision": "Decimal places",
-              "duration": "Averaging window"
+              "duration": "Averaging window",
+              "weights": "Source weights",
+              "max_source_age": "Maximum source age",
+              "process_undef_as": "Undefined value fallback",
+              "ignore_undef": "Ignore undefined history intervals",
+              "calculate_to_now_undef": "Extend last valid history reading"
             },
             "data_description": {
               "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
               "end": "Optional template that renders the end of the history range as a datetime or timestamp. Use with start or average window. Leave empty to end at now.",
               "scan_interval": "Minimum time between history recalculations. Does not change how often the source devices report readings.",
               "precision": "Number of decimal places used for the sensor state.",
-              "duration": "Leave empty to average current readings. Set a duration to average recorded readings over that window."
+              "duration": "Leave empty to average current readings. Set a duration to average recorded readings over that window.",
+              "weights": "Optional mapping of source entity IDs to weights, for example sensor.room_a: 2 and sensor.room_b: 1. Omitted sources use weight 1. Clear the mapping for equal weights.",
+              "max_source_age": "Optional age limit based on the source last_updated time. Clear to disable. Strict mode requires every source to be fresh.",
+              "process_undef_as": "Optional numeric substitute for undefined readings. Clear to omit undefined values. Never overrides Require every source.",
+              "ignore_undef": "Allow averaging valid history intervals when the latest recorded reading is undefined. Does not override strict source availability.",
+              "calculate_to_now_undef": "Assume the last valid reading continues through undefined history intervals. Requires Ignore undefined history intervals."
             }
           }
         }
@@ -40,7 +50,8 @@
       "too_many_period_options": "Use no range, only an average window, or two of start, end, and average window.",
       "no_sources": "Select at least one source entity.",
       "invalid_duration": "Durations must be greater than zero. Clear an optional duration to disable it.",
-      "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled."
+      "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled.",
+      "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight."
     }
   },
   "options": {
@@ -64,14 +75,24 @@
               "end": "End time template",
               "scan_interval": "History update interval",
               "precision": "Decimal places",
-              "duration": "Averaging window"
+              "duration": "Averaging window",
+              "weights": "Source weights",
+              "max_source_age": "Maximum source age",
+              "process_undef_as": "Undefined value fallback",
+              "ignore_undef": "Ignore undefined history intervals",
+              "calculate_to_now_undef": "Extend last valid history reading"
             },
             "data_description": {
               "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
               "end": "Optional template that renders the end of the history range as a datetime or timestamp. Use with start or average window. Leave empty to end at now.",
               "scan_interval": "Minimum time between history recalculations. Does not change how often the source devices report readings.",
               "precision": "Number of decimal places used for the sensor state.",
-              "duration": "Leave empty to average current readings. Set a duration to average recorded readings over that window."
+              "duration": "Leave empty to average current readings. Set a duration to average recorded readings over that window.",
+              "weights": "Optional mapping of source entity IDs to weights, for example sensor.room_a: 2 and sensor.room_b: 1. Omitted sources use weight 1. Clear the mapping for equal weights.",
+              "max_source_age": "Optional age limit based on the source last_updated time. Clear to disable. Strict mode requires every source to be fresh.",
+              "process_undef_as": "Optional numeric substitute for undefined readings. Clear to omit undefined values. Never overrides Require every source.",
+              "ignore_undef": "Allow averaging valid history intervals when the latest recorded reading is undefined. Does not override strict source availability.",
+              "calculate_to_now_undef": "Assume the last valid reading continues through undefined history intervals. Requires Ignore undefined history intervals."
             }
           }
         }
@@ -82,13 +103,14 @@
       "too_many_period_options": "Use no range, only an average window, or two of start, end, and average window.",
       "no_sources": "Select at least one source entity.",
       "invalid_duration": "Durations must be greater than zero. Clear an optional duration to disable it.",
-      "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled."
+      "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled.",
+      "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight."
     }
   },
   "issues": {
     "yaml_imported": {
-      "title": "Average sensor YAML was imported",
-      "description": "Average Sensor YAML configuration has been imported into the UI integration. Remove the Average Sensor entries from YAML to avoid importing them again on future reloads or restarts."
+      "title": "Verify your imported Average Sensor configuration",
+      "description": "Average Sensor YAML configuration has been imported into UI config entries.\n\n1. Open **Settings > Devices & services > Integrations > Average Sensor**.\n2. Verify the existing entity IDs, unique IDs, settings, units, recorder history and statistics are intact.\n3. If you want to manage these sensors in the UI, comment out their **Average Sensor YAML definitions** after verification. Keep the commented definitions as a backup; do not delete or recreate the imported entries.\n\nActive YAML is imported again on startup or YAML reload and can overwrite UI edits. If you prefer to manage a sensor from YAML, leave its definition active and make changes there.\n\nThe integration does not edit your YAML files. You can dismiss this notice after completing these checks."
     }
   }
 }

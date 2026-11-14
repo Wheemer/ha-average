@@ -29,20 +29,20 @@ closed by us in July without upstream merge. Its fix is already in this fork.
 | [267](https://github.com/Limych/ha-average/issues/267) | Temperature unit recovery already implemented; startup metadata regression retained. |
 | [263](https://github.com/Limych/ha-average/issues/263) | Clarified in README: time-weighted level of a cumulative total is not consumption per day. |
 | [256](https://github.com/Limych/ha-average/issues/256) | Source-loss recovery covered by native tests; weekly failure not reproduced. Needs a minimal failing trace/config rather than a claim of resolution. |
-| [243](https://github.com/Limych/ha-average/issues/243) | Config-entry reload and restored identity tested; upstream Quick Reload report remains unproven. No automatic deletion of imported entries. |
+| [243](https://github.com/Limych/ha-average/issues/243) | Config-entry reload and restored identity tested; upstream Quick Reload report remains unproven. No automatic deletion of imported entries. Import notices now direct users to verify identities/settings/history before commenting out YAML for UI management. |
 | [225](https://github.com/Limych/ha-average/issues/225) | Backlog: seasonal accumulated temperature is a separate aggregation, not the current arithmetic/time-weighted mean. |
 | [223](https://github.com/Limych/ha-average/issues/223) | Backlog: long-term statistics support; raw recorder retention limitation documented. No silent switch to hourly statistics. |
-| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Large-window processing performance remains a separate follow-up. |
+| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Overall query/CPU cost remains a follow-up. |
 | [217](https://github.com/Limych/ha-average/issues/217) | YAML schema/import tested. Old check-config hang lacks a reproducer; no claim of resolution. |
 | [185](https://github.com/Limych/ha-average/issues/185) | Unit-based temperature detection and metadata recovery covered, including sources with statistics-style metadata. |
 | [184](https://github.com/Limych/ha-average/issues/184) | Backlog: hourly sampling changes averaging semantics and needs a separate explicit mode. |
-| [183](https://github.com/Limych/ha-average/issues/183) | UI configuration and Advanced interval/window controls implemented; native form/storage checks retained. |
+| [183](https://github.com/Limych/ha-average/issues/183) | All calculation options are editable in Advanced, including legacy age/fallback and history-gap controls; native round-trip/explicit-clear checks preserve values and identity. |
 | [175](https://github.com/Limych/ha-average/issues/175) | Missing/invalid source recovery covered; missing sources log at debug level. No forced zero fallback added. |
-| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered; long-window query/processing benchmark and event-loop work remain backlog. |
+| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; long-window database/query cost and timeout behavior remain separate follow-up work. |
 | [143](https://github.com/Limych/ha-average/issues/143) | Stacked temperature-unit metadata recovery covered. |
 | [123](https://github.com/Limych/ha-average/issues/123) | Intentional preservation: removing YAML does not delete imported entries or history. Remove unwanted entries explicitly from Integrations. Regression checks preserve entry and entity identity. |
 | [109](https://github.com/Limych/ha-average/issues/109) | Partial averages skip unavailable/unknown sources; restore/recovery and invalid-value checks covered. New undefined-history flags support explicit gap policy. Original screenshot not reproduced. |
-| [83](https://github.com/Limych/ha-average/issues/83) | Backlog: optional per-source weights with explicit zero/missing-weight rules. |
+| [83](https://github.com/Limych/ha-average/issues/83) | Implemented optional source weights in Advanced and YAML, including partial-mode renormalization, strict-mode zero-weight rules, stable identity and finite/nonnegative validation. Existing sensors retain equal weights. |
 | [56](https://github.com/Limych/ha-average/issues/56) | Backlog: selecting weather/climate attributes needs unit/device-class rules. Template sensors remain an explicit workaround. |
 | [55](https://github.com/Limych/ha-average/issues/55) | Corrected README management route and described UI/YAML import behavior. |
 | [26](https://github.com/Limych/ha-average/issues/26) | Added cautious comparison with Filter; no claim that one is universally more accurate. |
