@@ -78,3 +78,5 @@ CONF_IGNORE_UNDEF: Final = "ignore_undef"
 CONF_CALCULATE_TO_NOW_UNDEF: Final = "calculate_to_now_undef"
 
 CONF_WEIGHTS: Final = "weights"
+
+CONF_SOURCE_ATTRIBUTES: Final = "source_attributes"

@@ -118,3 +118,22 @@ async def test_failed_refresh_releases_in_progress_guard(hass):
     sensor._async_update_state = AsyncMock()
     await sensor.async_update()
     sensor._async_update_state.assert_awaited_once()
+
+
+async def test_completed_period_trend_does_not_extrapolate_into_the_past(hass):
+    """Calculation delay after a completed period cannot move its final trend."""
+    sensor, recorder = history_sensor(hass, size=2)
+    await sensor._async_update_period()
+    end = sensor._actual_end
+    sensor._period = None
+    # The fixed period is complete; processing starts two seconds later.
+    with (
+        patch("custom_components.average.sensor.get_instance", return_value=recorder),
+        patch(
+            "custom_components.average.sensor.dt_util.now",
+            return_value=end + timedelta(seconds=2),
+        ),
+    ):
+        await sensor._async_update_state()
+    assert sensor.native_value == 30
+    assert sensor.trending_towards == 30

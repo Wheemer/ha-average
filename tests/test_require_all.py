@@ -87,6 +87,7 @@ class RequireAllTests(unittest.TestCase):
             available_sources=2,
             _attr_native_value=35,
             _temperature_mode=False,
+            _get_source_value=lambda state: state.state,
             _is_source_stale=lambda state, now: False,
             _has_state=lambda value: value is not None,
             hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),

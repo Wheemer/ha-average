@@ -29,6 +29,7 @@ from homeassistant.helpers.schema_config_entry_flow import (
     SchemaFlowFormStep,
 )
 
+from .attributes import normalize_source_attributes
 from .const import (
     CONF_CALCULATE_TO_NOW_UNDEF,
     CONF_DURATION,
@@ -38,6 +39,7 @@ from .const import (
     CONF_PRECISION,
     CONF_PROCESS_UNDEF_AS,
     CONF_REQUIRE_ALL_SOURCES,
+    CONF_SOURCE_ATTRIBUTES,
     CONF_START,
     CONF_WEIGHTS,
     DEFAULT_NAME,
@@ -62,6 +64,7 @@ SECTIONS = {
         CONF_SCAN_INTERVAL,
         CONF_PRECISION,
         CONF_WEIGHTS,
+        CONF_SOURCE_ATTRIBUTES,
         CONF_MAX_SOURCE_AGE,
         CONF_PROCESS_UNDEF_AS,
         CONF_IGNORE_UNDEF,
@@ -128,6 +131,14 @@ def _validate_period(user_input: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError) as err:
             error = "invalid_weights"
             raise SchemaFlowError(error) from err
+    if CONF_SOURCE_ATTRIBUTES in user_input:
+        try:
+            user_input[CONF_SOURCE_ATTRIBUTES] = normalize_source_attributes(
+                user_input[CONF_SOURCE_ATTRIBUTES], user_input[CONF_ENTITIES]
+            )
+        except (TypeError, ValueError) as err:
+            error = "invalid_source_attributes"
+            raise SchemaFlowError(error) from err
     return user_input
 
 
@@ -163,8 +174,9 @@ def _yaml_config_to_options(config: dict[str, Any]) -> dict[str, Any]:
         CONF_REQUIRE_ALL_SOURCES: config.get(CONF_REQUIRE_ALL_SOURCES, False),
     }
 
-    if CONF_WEIGHTS in config:
-        options[CONF_WEIGHTS] = config[CONF_WEIGHTS]
+    for key in (CONF_WEIGHTS, CONF_SOURCE_ATTRIBUTES):
+        if key in config:
+            options[key] = config[key]
 
     if unique_id := config.get(CONF_UNIQUE_ID):
         options[CONF_UNIQUE_ID] = unique_id
@@ -257,6 +269,7 @@ ADVANCED_SCHEMA = probatio.Schema(
             selector.NumberSelectorConfig(step=1, mode=selector.NumberSelectorMode.BOX)
         ),
         probatio.Optional(CONF_WEIGHTS): selector.ObjectSelector(),
+        probatio.Optional(CONF_SOURCE_ATTRIBUTES): selector.ObjectSelector(),
         probatio.Optional(CONF_MAX_SOURCE_AGE): selector.DurationSelector(
             selector.DurationSelectorConfig(allow_negative=False)
         ),

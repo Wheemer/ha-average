@@ -43,7 +43,7 @@ closed by us in July without upstream merge. Its fix is already in this fork.
 | [123](https://github.com/Limych/ha-average/issues/123) | Intentional preservation: removing YAML does not delete imported entries or history. Remove unwanted entries explicitly from Integrations. Regression checks preserve entry and entity identity. |
 | [109](https://github.com/Limych/ha-average/issues/109) | Partial averages skip unavailable/unknown sources; restore/recovery and invalid-value checks covered. New undefined-history flags support explicit gap policy. Original screenshot not reproduced. |
 | [83](https://github.com/Limych/ha-average/issues/83) | Implemented optional source weights in Advanced and YAML, including partial-mode renormalization, strict-mode zero-weight rules, stable identity and finite/nonnegative validation. Existing sensors retain equal weights. |
-| [56](https://github.com/Limych/ha-average/issues/56) | Backlog: selecting weather/climate attributes needs unit/device-class rules. Template sensors remain an explicit workaround. |
+| [56](https://github.com/Limych/ha-average/issues/56) | Implemented optional per-source attribute selection in YAML and Advanced. Covers weather/local humidity, numeric attributes, recognized metadata, explicit temperature conversion, strict loss/recovery, history and weights. Compatible non-temperature units are still required; no implicit quantity switching. |
 | [55](https://github.com/Limych/ha-average/issues/55) | Corrected README management route and described UI/YAML import behavior. |
 | [26](https://github.com/Limych/ha-average/issues/26) | Added cautious comparison with Filter; no claim that one is universally more accurate. |
 | [20](https://github.com/Limych/ha-average/issues/20) | Backlog: median of samples needs a separate explicit mode; arithmetic mean unchanged. |
@@ -62,3 +62,17 @@ All testing occurs in isolated Linux containers. Full Core/SQLite recorder shutd
 is exercised in a native test, including an actual state event during CLOSE and a
 previously queued source callback after executor shutdown. This does not prove a
 live installation's shutdown. No release or live deployment is implied by this work.
+
+
+## Source-attribute follow-up
+
+A required weather entity could retain numeric temperature attributes while its
+state was unavailable. Strict availability now rejects the unavailable source
+before reading retained attributes. Tests cover both default temperature and
+explicit attributes. Ordinary non-temperature sources also recover units/device
+class when metadata arrives after their first reading, without a reload.
+
+A delayed calculation could also project `trending_towards` beyond a completed
+period. The projection fraction is now bounded to the configured period and a
+zero-length projection is omitted. This leaves the calculated mean unchanged.
+A deterministic completed-period regression covers the delay case.
