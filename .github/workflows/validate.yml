@@ -1,37 +1,39 @@
-name: "Validate"
-
+name: Validate
 on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
   workflow_dispatch:
   schedule:
-    - cron:  "0 0 * * *"
-  push:
-    branches:
-      - "main"
-  pull_request:
-    branches:
-      - "main"
-
+    - cron: '0 0 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
-  hassfest: # https://developers.home-assistant.io/blog/2020/04/16/hassfest
-    name: "Hassfest Validation"
-    runs-on: "ubuntu-latest"
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-        - name: "Checkout the repository"
-          uses: "actions/checkout@v4.2.2"
-
-        - name: "Run hassfest validation"
-          uses: "home-assistant/actions/hassfest@master"
-
-  hacs: # https://github.com/hacs/action
-    name: "HACS Validation"
-    runs-on: "ubuntu-latest"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361 # master
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-        - name: "Checkout the repository"
-          uses: "actions/checkout@v4.2.2"
-
-        - name: "Run HACS validation"
-          uses: "hacs/action@main"
-          with:
-            category: "integration"
-            # Remove this 'ignore' key when you have added brand images for your integration to https://github.com/home-assistant/brands
-            ignore: "brands"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
+        with:
+          category: integration
+          # GitHub cannot identify the inherited CC-BY-NC-SA-4.0 license
+          # (upstream also reports NOASSERTION). Preserve its terms unchanged.
+          ignore: license
+          comment: false

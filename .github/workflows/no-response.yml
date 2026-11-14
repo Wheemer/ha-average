@@ -1,18 +1,31 @@
 name: No Response
-
-# Both `issue_comment` and `scheduled` event types are required for this Action
-# to work properly.
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
   schedule:
-    # Schedule for five minutes after the hour, every hour
     - cron: '5 * * * *'
-
+permissions:
+  contents: read
 jobs:
-  noResponse:
+  feedback:
+    name: Awaiting feedback
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
     steps:
-      - uses: lee-dohm/no-response@v0.5.0
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
         with:
-          token: ${{ github.token }}
+          only-issue-labels: waiting for feedback
+          exempt-issue-labels: security,pinned
+          days-before-issue-stale: 14
+          days-before-issue-close: 0
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          stale-issue-label: stale
+          stale-issue-message: >-
+            This issue is waiting for the requested information. Please reply
+            with the missing details so we can continue investigating.
+          close-issue-message: >-
+            Closed after 14 days without the requested information. Please reply
+            with the missing details if you would like us to investigate further.
+          operations-per-run: 30

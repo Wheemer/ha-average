@@ -33,3 +33,24 @@ docker run --rm --network none -v "$PWD:/work:ro" -w /work \
 The tests use temporary databases and synthetic sources. They do not connect to
 or control a live Home Assistant installation. No private installation evidence
 or credentials are needed. Keep generated `tests/testing_config/` out of commits.
+
+
+## GitHub Actions test environment
+
+CI builds `tests/Dockerfile`, installs the declared development/test dependencies,
+and runs Ruff and the complete suite with networking disabled. The image keeps
+its exact Home Assistant version after installing Core-maintained fixtures,
+which can pin a different patch release. The current base is Core 2026.11.1;
+`requirements-ci.txt` supplies the matching fixture series and lint version.
+
+```sh
+docker build -f tests/Dockerfile -t average-ci .
+docker run --rm --network none -v "$PWD:/work" average-ci -m pytest -q
+```
+
+GitHub Actions, container-image and Python dependency updates are proposed by
+Dependabot. CI requires no administrator token or private Home Assistant access.
+HACS validates the fork's metadata, topics, issues and packaging. Its license
+identification check has an explicit exception because GitHub reports the
+inherited CC-BY-NC-SA-4.0 text as `NOASSERTION`, including in the upstream
+repository. `LICENSE.md` and its attribution/terms are unchanged.

@@ -1,31 +1,29 @@
 name: Lock Inactive Threads
-
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 5 * * *'
-  workflow_dispatch:
-
 permissions:
-  issues: write
-  pull-requests: write
-
+  contents: read
 concurrency:
-  group: lock
-
+  group: lock-closed-threads
 jobs:
   lock:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      pull-requests: write
     steps:
-      - uses: dessant/lock-threads@v5
+      - uses: dessant/lock-threads@89ae32b08ed1a541efecbab17912962a5e38981c # v6.0.2
         with:
           github-token: ${{ github.token }}
-          issue-lock-inactive-days: 30
-          issue-lock-comment: >
-            This issue has been automatically locked since there
-            has not been any recent activity after it was closed.
-            Please open a new issue for related bugs.
-          pr-lock-inactive-days: 30
-          pr-lock-comment: >
-            This pull request has been automatically locked since there
-            has not been any recent activity after it was closed.
-            Please open a new issue for related bugs.
+          issue-inactive-days: 30
+          issue-comment: >-
+            This closed issue has been locked after 30 days of inactivity.
+            Please open a new issue for a new or related problem.
+          pr-inactive-days: 30
+          pr-comment: >-
+            This closed pull request has been locked after 30 days of inactivity.
+            Please open a new issue for a new or related problem.
+          process-only: issues,prs
