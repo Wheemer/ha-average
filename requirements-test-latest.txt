@@ -1,2 +1,2 @@
 # Forward-compatibility job only; the fixture-baseline job retains upstream pins.
-pytest-asyncio>=1.4.1.post1
+pytest-asyncio==1.4.1.post1

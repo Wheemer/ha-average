@@ -417,7 +417,7 @@ installation updates are separate steps.
 Average Sensor was originally created by [Andrey “Limych” Khrolenok](https://github.com/Limych).
 This fork builds on his work, with the original attribution and license retained.
 
-If you'd like to support the original author, visit [Limych's Patreon](https://www.patreon.com/limych).
+Support this fork's maintenance through [GitHub Sponsors](https://github.com/sponsors/Wheemer) or [PayPal](https://www.paypal.me/wheemer).
 
 ## License
 
