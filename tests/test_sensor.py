@@ -139,7 +139,15 @@ async def test_setup_platform(hass: HomeAssistant):
     }
 
     await async_setup_platform(hass, config, async_add_entities, None)
-    assert async_add_entities.called
+    await hass.async_block_till_done()
+    assert not async_add_entities.called
+    entries = hass.config_entries.async_entries(DOMAIN)
+    assert len(entries) == 1
+    assert (
+        entries[0].options.get(CONF_ENTITIES, entries[0].data.get(CONF_ENTITIES))
+        == config[CONF_ENTITIES]
+    )
+    assert hass.states.get("sensor.test") is not None
 
 
 async def test_entity_initialization(
@@ -148,6 +156,7 @@ async def test_entity_initialization(
     """Test sensor initialization."""
     expected_attributes = {
         "available_sources": 0,
+        "require_all_sources": False,
         "count": 0,
         "count_sources": 1,
         "sources": ["sensor.test_monitored"],

@@ -7,6 +7,7 @@ select = [
     "ALL",
 ]
 ignore = [
+    "CPY001", # Existing source files do not consistently carry copyright headers
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
     "D203", # no-blank-line-before-class (incompatible with formatter)
     "D212", # multi-line-summary-first-line (incompatible with formatter)
@@ -38,3 +39,10 @@ max-complexity = 25
     "S106", # hardcoded-password-func-arg
     "S107", # hardcoded-password-default
 ]
+
+# These harnesses intentionally run with unittest in the native HA image as well
+# as pytest; their assertions and local callbacks are not pytest-only code.
+"tests/test_flow_sections.py" = ["D101", "D102", "PT009", "PT027", "PLC0415"]
+"tests/test_require_all.py" = ["D101", "D102", "D103", "ANN202", "PT009", "PT027", "ARG005", "S102"]
+"tests/test_shutdown_native.py" = ["D101", "D102", "ANN202", "ANN002", "PT009", "PT027", "PLC0415", "ARG005", "S102"]
+"tests/test_shutdown_recorder_native.py" = ["D101", "D102", "ANN202", "PT009", "PT027"]

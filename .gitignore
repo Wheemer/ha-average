@@ -78,3 +78,6 @@ config/*
 /custom_components/__init__.py
 /test*.py
 secrets.yaml
+
+# Temporary Home Assistant test configuration
+/tests/testing_config/

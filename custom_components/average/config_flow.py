@@ -6,7 +6,7 @@ from datetime import timedelta
 from hashlib import sha1
 from typing import TYPE_CHECKING, Any, cast
 
-import voluptuous as vol
+import probatio
 from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.components.input_number import DOMAIN as INPUT_NUMBER_DOMAIN
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
@@ -19,21 +19,25 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
 )
-from homeassistant.helpers import selector
 from homeassistant.data_entry_flow import section
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import selector
 from homeassistant.helpers.schema_config_entry_flow import (
+    SchemaCommonFlowHandler,
     SchemaConfigFlowHandler,
     SchemaFlowError,
     SchemaFlowFormStep,
 )
 
 from .const import (
+    CONF_CALCULATE_TO_NOW_UNDEF,
     CONF_DURATION,
     CONF_END,
+    CONF_IGNORE_UNDEF,
     CONF_MAX_SOURCE_AGE,
-    CONF_REQUIRE_ALL_SOURCES,
     CONF_PRECISION,
     CONF_PROCESS_UNDEF_AS,
+    CONF_REQUIRE_ALL_SOURCES,
     CONF_START,
     DEFAULT_NAME,
     DEFAULT_PRECISION,
@@ -48,14 +52,33 @@ if TYPE_CHECKING:
 ERR_PERIOD_START_OR_END_WITHOUT_DURATION = "period_start_or_end_without_duration"
 ERR_TOO_MANY_PERIOD_OPTIONS = "too_many_period_options"
 DEFAULT_SCAN_INTERVAL_SELECTOR = {"seconds": 20}
-ADVANCED_KEYS = (CONF_START, CONF_END, CONF_SCAN_INTERVAL, CONF_PROCESS_UNDEF_AS, CONF_MAX_SOURCE_AGE)
+SECTIONS = {
+    "advanced": (
+        CONF_DURATION,
+        CONF_START,
+        CONF_END,
+        CONF_SCAN_INTERVAL,
+        CONF_PRECISION,
+    ),
+}
 
 
-async def suggested_options(handler):
+async def suggested_options(handler: SchemaCommonFlowHandler) -> dict[str, Any]:
     """Present flat stored options in the collapsible form section."""
     options = dict(handler.options)
-    options["advanced"] = {key: options.pop(key) for key in ADVANCED_KEYS if key in options}
+    for key in (
+        CONF_MAX_SOURCE_AGE,
+        CONF_PROCESS_UNDEF_AS,
+        CONF_IGNORE_UNDEF,
+        CONF_CALCULATE_TO_NOW_UNDEF,
+    ):
+        options.pop(key, None)
+    for section_name, keys in SECTIONS.items():
+        options[section_name] = {
+            key: options.pop(key) for key in keys if key in options
+        }
     return options
+
 
 SOURCE_DOMAINS = [
     SENSOR_DOMAIN,
@@ -78,6 +101,24 @@ def _validate_period(user_input: dict[str, Any]) -> dict[str, Any]:
         raise SchemaFlowError(ERR_PERIOD_START_OR_END_WITHOUT_DURATION)
     if period_count > 2:  # noqa: PLR2004
         raise SchemaFlowError(ERR_TOO_MANY_PERIOD_OPTIONS)
+
+    if user_input.get(CONF_CALCULATE_TO_NOW_UNDEF) and not user_input.get(
+        CONF_IGNORE_UNDEF
+    ):
+        error = "invalid_undefined_options"
+        raise SchemaFlowError(error)
+    if not user_input.get(CONF_ENTITIES):
+        error = "no_sources"
+        raise SchemaFlowError(error)
+    for key in (CONF_DURATION, CONF_SCAN_INTERVAL, CONF_MAX_SOURCE_AGE):
+        if user_input.get(key) is not None:
+            error = "invalid_duration"
+            try:
+                seconds = cv.time_period(user_input[key]).total_seconds()
+            except (ValueError, TypeError, probatio.Invalid) as err:
+                raise SchemaFlowError(error) from err
+            if seconds <= 0:
+                raise SchemaFlowError(error)
 
     return user_input
 
@@ -125,6 +166,10 @@ def _yaml_config_to_options(config: dict[str, Any]) -> dict[str, Any]:
         if value := _duration_to_selector(config.get(key)):
             options[key] = value
 
+    for key in (CONF_IGNORE_UNDEF, CONF_CALCULATE_TO_NOW_UNDEF):
+        if key in config:
+            options[key] = config[key]
+
     if (undef := config.get(CONF_PROCESS_UNDEF_AS)) is not None:
         options[CONF_PROCESS_UNDEF_AS] = undef
 
@@ -160,22 +205,39 @@ async def validate_options(
 ) -> dict[str, Any]:
     """Validate the form while retaining the flat storage contract."""
     options = dict(user_input)
-    advanced = options.pop("advanced", None)
-    if advanced is None:
-        advanced = {key: _handler.options[key] for key in ADVANCED_KEYS if key in _handler.options}
-    options.update(advanced)
+    for key in (
+        CONF_REQUIRE_ALL_SOURCES,
+        CONF_MAX_SOURCE_AGE,
+        CONF_PROCESS_UNDEF_AS,
+        CONF_IGNORE_UNDEF,
+        CONF_CALCULATE_TO_NOW_UNDEF,
+    ):
+        if key in _handler.options:
+            options.setdefault(key, _handler.options[key])
+    for section_name, keys in SECTIONS.items():
+        selected = options.pop(section_name, None)
+        if selected is None:
+            for key in keys:
+                if key in _handler.options:
+                    options.setdefault(key, _handler.options[key])
+        else:
+            options.update(selected)
     _validate_period(options)
     # Clearing an advanced field must also clear its previously saved value.
-    for key in ADVANCED_KEYS:
-        _handler.options.pop(key, None)
+    for keys in SECTIONS.values():
+        for key in keys:
+            _handler.options.pop(key, None)
     return options
 
 
-ADVANCED_SCHEMA = vol.Schema(
+ADVANCED_SCHEMA = probatio.Schema(
     {
-        vol.Optional(CONF_START): selector.TextSelector(),
-        vol.Optional(CONF_END): selector.TextSelector(),
-        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_SELECTOR): (
+        probatio.Optional(CONF_DURATION): selector.DurationSelector(
+            selector.DurationSelectorConfig(allow_negative=False)
+        ),
+        probatio.Optional(CONF_START): selector.TemplateSelector(),
+        probatio.Optional(CONF_END): selector.TemplateSelector(),
+        probatio.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_SELECTOR): (
             selector.DurationSelector(
                 selector.DurationSelectorConfig(
                     enable_day=False,
@@ -183,34 +245,33 @@ ADVANCED_SCHEMA = vol.Schema(
                 )
             )
         ),
-        vol.Optional(CONF_PROCESS_UNDEF_AS): selector.NumberSelector(
-            selector.NumberSelectorConfig(mode=selector.NumberSelectorMode.BOX)
-        ),
-        vol.Optional(CONF_MAX_SOURCE_AGE): selector.DurationSelector(
-            selector.DurationSelectorConfig(allow_negative=False)
+        probatio.Optional(
+            CONF_PRECISION, default=DEFAULT_PRECISION
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=6, step=1, mode=selector.NumberSelectorMode.BOX
+            )
         ),
     }
 )
 
-OPTIONS_SCHEMA = vol.Schema(
+OPTIONS_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_ENTITIES): selector.EntitySelector(
-            selector.EntitySelectorConfig(domain=SOURCE_DOMAINS, multiple=True, reorder=True)
+        probatio.Required(CONF_ENTITIES): selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain=SOURCE_DOMAINS, multiple=True, reorder=True
+            )
         ),
-        vol.Optional(CONF_DURATION): selector.DurationSelector(
-            selector.DurationSelectorConfig(allow_negative=False)
-        ),
-        vol.Optional(CONF_PRECISION, default=DEFAULT_PRECISION): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=6, step=1, mode=selector.NumberSelectorMode.BOX)
-        ),
-        vol.Optional(CONF_REQUIRE_ALL_SOURCES, default=False): selector.BooleanSelector(),
-        vol.Optional("advanced"): section(ADVANCED_SCHEMA, {"collapsed": True}),
+        probatio.Optional(
+            CONF_REQUIRE_ALL_SOURCES, default=False
+        ): selector.BooleanSelector(),
+        probatio.Optional("advanced"): section(ADVANCED_SCHEMA, {"collapsed": True}),
     }
 )
 
-CONFIG_SCHEMA = vol.Schema(
+CONFIG_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_NAME, default=DEFAULT_NAME): selector.TextSelector(),
+        probatio.Required(CONF_NAME, default=DEFAULT_NAME): selector.TextSelector(),
     }
 ).extend(OPTIONS_SCHEMA.schema)
 
