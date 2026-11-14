@@ -367,7 +367,9 @@ If a maximum source age is configured, check each source's `last_updated` time.
 
 For history averages, confirm the sources are included in Recorder and that
 history exists for the requested period. Allow the configured update interval
-for a new calculation.
+for a new calculation. For a closed historical period, incomplete results are
+retried at that interval when sources or recorder history become available;
+a complete recorded-history result is cached.
 
 ### A temperature unit is missing
 
