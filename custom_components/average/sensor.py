@@ -319,6 +319,8 @@ class AverageSensor(RestoreSensor):
         self._update_interval = config.get(CONF_SCAN_INTERVAL, UPDATE_MIN_TIME)
         self._last_update = None
         self._update_in_progress = False
+        self._history_complete = False
+        self._last_history_metadata = None
         self._stopping = False
         self._temperature_mode = None
         self._actual_end = None
@@ -778,6 +780,9 @@ class AverageSensor(RestoreSensor):
             self._attr_icon = None
             return
         if self._temperature_mode is True:
+            self._attr_native_unit_of_measurement = (
+                self.hass.config.units.temperature_unit
+            )
             return
 
         domain = split_entity_id(state.entity_id)[0]
@@ -851,11 +856,20 @@ class AverageSensor(RestoreSensor):
         p_start_ts = math.floor(dt_util.as_timestamp(p_start))
         p_end_ts = math.floor(dt_util.as_timestamp(p_end))
 
-        # If period has not changed and current time after the period end..
-        if start_ts == p_start_ts and end_ts == p_end_ts and end_ts <= now_ts:
-            # Don't compute anything as the value cannot have changed
+        metadata = self._history_metadata_signature()
+        # A closed period can be cached only after a complete calculation.
+        if (
+            start_ts == p_start_ts
+            and end_ts == p_end_ts
+            and end_ts <= now_ts
+            and self._history_complete
+            and metadata == self._last_history_metadata
+        ):
+            # Reuse completed history until source metadata changes.
             return
 
+        self._history_complete = False
+        self._last_history_metadata = metadata
         self.available_sources = 0
         self.count = 0
         self.min_value = self.max_value = None
@@ -864,6 +878,7 @@ class AverageSensor(RestoreSensor):
         #
         values = []
         last_values = []
+        history_complete = True
 
         # pylint: disable=too-many-nested-blocks
         for entity_id in self.sources:
@@ -876,8 +891,10 @@ class AverageSensor(RestoreSensor):
 
             if state is None:
                 _LOGGER.debug('Unable to find an entity "%s"', entity_id)
+                history_complete = False
                 continue
             if self._is_source_stale(state, now):
+                history_complete = False
                 continue
 
             self._init_mode(state)
@@ -903,6 +920,7 @@ class AverageSensor(RestoreSensor):
                 or history_list[entity_id] is None
                 or len(history_list[entity_id]) == 0
             ):
+                history_complete = False
                 value = self._get_state_value(state)
                 _LOGGER.warning(
                     'Historical data not found for entity "%s". Current state used: %s',
@@ -961,6 +979,11 @@ class AverageSensor(RestoreSensor):
                 )
 
         self._attr_native_value = self._weighted_average(values)
+        self._history_complete = (
+            history_complete
+            and self.available_sources == self.count_sources
+            and self._attr_native_value is not None
+        )
 
         current_average = self._weighted_average(last_values)
         if (
@@ -985,6 +1008,31 @@ class AverageSensor(RestoreSensor):
             self.trending_towards,
             self._attr_native_unit_of_measurement,
         )
+
+    def _history_metadata_signature(self) -> tuple[tuple[Any, ...], ...]:
+        """Detect late source units/classes before accepting a cached history result."""
+        signature = [(self.hass.config.units.temperature_unit,)]
+        keys = (
+            ATTR_DEVICE_CLASS,
+            ATTR_UNIT_OF_MEASUREMENT,
+            "temperature_unit",
+            "pressure_unit",
+            "wind_speed_unit",
+        )
+        for entity_id in self.sources:
+            state = self.hass.states.get(entity_id)
+            if state is None:
+                signature.append((entity_id, None))
+                continue
+            attribute = self._source_attributes.get(entity_id)
+            signature.append(
+                (
+                    entity_id,
+                    *(state.attributes.get(key) for key in keys),
+                    state.attributes.get(f"{attribute}_unit") if attribute else None,
+                )
+            )
+        return tuple(signature)
 
     def _weighted_average(self, values: list[tuple[float, float]]) -> float | None:
         """Combine source values, preserving equal weighting when unconfigured."""
