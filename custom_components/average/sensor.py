@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import math
 import numbers
-from asyncio import sleep
+from asyncio import CancelledError, Future, ensure_future, shield, sleep
 from contextlib import suppress
 from datetime import datetime, timedelta
 from functools import partial
@@ -111,6 +111,30 @@ from .weights import normalize_weights
 _LOGGER = logging.getLogger(__name__)
 YAML_IMPORT_ISSUE_ID = "yaml_imported"
 HISTORY_PROCESSING_BATCH_SIZE = 512
+
+
+def _materialized_history(
+    hass: HomeAssistant,
+    start: datetime,
+    end: datetime,
+    entity_id: str,
+    *,
+    uses_attributes: bool,
+) -> dict[str, list[State]]:
+    """Query and decode recorder's lazy states entirely in its executor."""
+    if uses_attributes:
+        result = history.get_significant_states(
+            hass, start, end, [entity_id], significant_changes_only=False
+        )
+    else:
+        result = history.state_changes_during_period(hass, start, end, entity_id)
+    for states in result.values():
+        for state in states or ():
+            if state is not None:
+                # LazyState defers JSON decoding and datetime construction until
+                # first access. Keep that work out of the averaging event loop.
+                _ = state.attributes, state.last_changed, state.last_updated
+    return result
 
 
 def check_period_keys(conf: ConfigType) -> ConfigType:
@@ -319,6 +343,7 @@ class AverageSensor(RestoreSensor):
         self._update_interval = config.get(CONF_SCAN_INTERVAL, UPDATE_MIN_TIME)
         self._last_update = None
         self._update_in_progress = False
+        self._pending_history_query: Future | None = None
         self._history_complete = False
         self._last_history_metadata = None
         self._stopping = False
@@ -645,7 +670,12 @@ class AverageSensor(RestoreSensor):
 
     async def async_update(self) -> None:
         """Update the sensor state if it needed."""
-        if self._stopping or self.hass.is_stopping or self._update_in_progress:
+        if (
+            self._stopping
+            or self.hass.is_stopping
+            or self._update_in_progress
+            or self._pending_history_query is not None
+        ):
             return
 
         if not self._has_period:
@@ -833,9 +863,47 @@ class AverageSensor(RestoreSensor):
             self._attr_native_unit_of_measurement = unit_of_measurement
             self._attr_icon = state.attributes.get(ATTR_ICON)
 
+    async def _async_query_history(
+        self, start: datetime, end: datetime, entity_id: str, *, uses_attributes: bool
+    ) -> dict[str, list[State]]:
+        """Keep a cancelled refresh from queuing work over a still-running query."""
+        query = partial(_materialized_history, uses_attributes=uses_attributes)
+        pending = ensure_future(
+            get_instance(self.hass).async_add_executor_job(
+                query, self.hass, start, end, entity_id
+            )
+        )
+        self._pending_history_query = pending
+
+        @callback
+        def query_done(future: Future) -> None:
+            if self._pending_history_query is future:
+                self._pending_history_query = None
+
+        @callback
+        def abandoned_query_done(future: Future) -> None:
+            if not future.cancelled() and (error := future.exception()) is not None:
+                _LOGGER.error(
+                    "Recorder query failed after its refresh was cancelled",
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+
+        pending.add_done_callback(query_done)
+        try:
+            # Cancelling an asyncio Future cannot stop an executing SQL query.
+            # Retain its real completion state so the next poll cannot overlap it.
+            return await shield(pending)
+        except CancelledError:
+            pending.add_done_callback(abandoned_query_done)
+            raise
+
     async def _async_update_state(self) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         """Update the sensor state."""
-        if self._stopping or self.hass.is_stopping:
+        if (
+            self._stopping
+            or self.hass.is_stopping
+            or self._pending_history_query is not None
+        ):
             return
         _LOGGER.debug('Updating sensor "%s"', self.name)
         p_period = self._period
@@ -929,26 +997,9 @@ class AverageSensor(RestoreSensor):
 
             # Get history between start and now
             uses_attributes = self._uses_attribute_value(entity_id)
-            if uses_attributes:
-                query = partial(
-                    history.get_significant_states,
-                    self.hass,
-                    start,
-                    end,
-                    [entity_id],
-                    significant_changes_only=False,
-                )
-                history_list = await get_instance(self.hass).async_add_executor_job(
-                    query
-                )
-            else:
-                history_list = await get_instance(self.hass).async_add_executor_job(
-                    history.state_changes_during_period,
-                    self.hass,
-                    start,
-                    end,
-                    str(entity_id),
-                )
+            history_list = await self._async_query_history(
+                start, end, entity_id, uses_attributes=uses_attributes
+            )
 
             if self._stopping or self.hass.is_stopping:
                 return

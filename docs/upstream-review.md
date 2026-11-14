@@ -32,13 +32,13 @@ closed by us in July without upstream merge. Its fix is already in this fork.
 | [243](https://github.com/Limych/ha-average/issues/243) | Reproduced and fixed rounded-end caching of unavailable, partial and current-value-fallback results; these now retry at the configured interval instead of requiring a reload. Successful complete closed windows remain cached. Changed active YAML now reloads the affected loaded entry, including source edits with an explicit unique ID and non-identity option edits using a stable generated import ID. Unchanged YAML avoids needless entry reloads. Restored source counts no longer override the configured list, fixing strict-mode unavailability after a source-count edit. The native Quick Reload handler preserves identity and working source listeners with YAML active or commented out; other installation-specific causes remain unproven. No automatic deletion of imported entries. Import notices now direct users to verify identities/settings/history before commenting out YAML for UI management. |
 | [225](https://github.com/Limych/ha-average/issues/225) | Backlog: seasonal accumulated temperature is a separate aggregation, not the current arithmetic/time-weighted mean. |
 | [223](https://github.com/Limych/ha-average/issues/223) | Backlog: long-term statistics support; raw recorder retention limitation documented. No silent switch to hourly statistics. |
-| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Overall query/CPU cost remains a follow-up. |
+| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Lazy recorder-state decoding now runs in the recorder executor, and cancelled refreshes cannot start replacement queries while their original SQL job is still running. Overall database/query cost remains a follow-up. |
 | [217](https://github.com/Limych/ha-average/issues/217) | Not reproduced on current Core: real native configuration checks finish for instantaneous, duration and template-range YAML, without creating entries/states. Bounded regression tests cover the path. The upstream reporter noted that a Core/integration update resolved their old hang; no speculative workaround added. |
 | [185](https://github.com/Limych/ha-average/issues/185) | Unit-based temperature detection and metadata recovery covered, including sources with statistics-style metadata. |
 | [184](https://github.com/Limych/ha-average/issues/184) | Backlog: hourly sampling changes averaging semantics and needs a separate explicit mode. |
 | [183](https://github.com/Limych/ha-average/issues/183) | All calculation options are editable in Advanced, including legacy age/fallback and history-gap controls; native round-trip/explicit-clear checks preserve values and identity. |
 | [175](https://github.com/Limych/ha-average/issues/175) | Reproduced a startup TypeError when a source-dependent period template returned None. Missing boundaries now remain unavailable without startup errors; invalid/future/zero-length periods cannot fall back to an instantaneous value or reuse a stale previous period. Valid boundaries recover through normal updates. The broader unspecified startup report is not claimed fully resolved. |
-| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; long-window database/query cost and timeout behavior remain separate follow-up work. |
+| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; lazy attribute/timestamp decoding now runs in the recorder executor. Cancellation retains the active query until its executor job completes, preventing overlapping replacement SQL work. Long-window database cost and the original ten-second warning remain separate validation work. |
 | [143](https://github.com/Limych/ha-average/issues/143) | Stacked temperature-unit metadata recovery covered. |
 | [123](https://github.com/Limych/ha-average/issues/123) | Intentional preservation: removing YAML does not delete imported entries or history. Remove unwanted entries explicitly from Integrations. Regression checks preserve entry and entity identity. |
 | [109](https://github.com/Limych/ha-average/issues/109) | Partial averages skip unavailable/unknown sources; restore/recovery and invalid-value checks covered. New undefined-history flags support explicit gap policy. Original screenshot not reproduced. |
@@ -152,3 +152,30 @@ IDs. Whole-second durations now retain the integer representation used at commit
 and interim float representations are recognized on reimport without rewriting
 stored entry IDs or creating a second entry; fractional seconds remain supported.
 These fixes do not establish the cause of the weekly report in #256.
+
+
+## Recorder decoding and cancellation follow-up (#168 / #222)
+
+Real SQLite tests reproduced deferred recorder-state JSON decoding on Home
+Assistant's event loop. History is now queried and its lazy attributes/timestamps
+materialized in the recorder executor before cooperative averaging starts. The
+state-change query for ordinary numeric sources and the all-updates query for
+attribute sources are unchanged. Six native SQLite cases verify that decoding
+happens outside the event-loop thread while preserving values, units and extrema.
+A 100,000-record workload also retains the expected weighted mean and allows
+other callbacks to run before processing finishes.
+
+A separate real-thread test reproduced overlapping SQL work after cancelling an
+in-progress refresh. Cancelling an asyncio waiter cannot stop its SQL thread.
+The underlying executor future is now shielded and retained until it actually
+finishes; polls and direct refreshes cannot submit replacement work for the same
+sensor during that interval. Late errors are logged and retrieved, and subsequent
+refreshes recover. Ordinary query errors still propagate normally. Both numeric
+and attribute query paths are covered, and the tests fail against the prior code.
+
+No timeout setting, hard SQL cancellation, sampling, data truncation or new
+calculation mode was introduced. The ten-second message in #168 is a Core slow
+update warning, not proof that its query was cancelled. These fixes reduce main
+loop work and prevent cancelled-query pileups; they do not prove every database
+or month-long history query will complete within ten seconds. Existing YAML
+`scan_interval` and UI **History update interval** settings remain unchanged.

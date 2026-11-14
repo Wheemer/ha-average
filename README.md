@@ -355,7 +355,7 @@ source sensors**.
 ## Limitations
 
 - **History retention:** windows use raw recorder state history. Long-term statistics are not queried automatically. A monthly window needs the relevant raw history retained for that period.
-- **Large windows:** frequently changing sources can produce large queries. A longer update interval reduces frequency, but does not remove the cost of processing a large history. History processing yields periodically so other Home Assistant callbacks can run during long calculations.
+- **Large windows:** frequently changing sources can produce large queries. A longer update interval reduces frequency, but does not remove the cost of processing a large history. Recorder results are decoded in the recorder executor, and history averaging yields periodically so other Home Assistant callbacks can run during long calculations. A cancelled refresh does not start replacement SQL work for that sensor until its existing query finishes. These measures do not impose a database-query time limit.
 - **Temperature units:** unmapped weather, climate, and water-heater temperatures retain the existing assumption that values use Home Assistant's configured unit. Explicit temperature-attribute selections use reported units when available. Historical unit changes cannot always be reconstructed.
 - **Compatible inputs:** use readings that represent the same quantity with compatible units. This integration does not perform arbitrary unit normalization for non-temperature values.
 - **Consumption totals:** averaging an increasing meter reading gives its average level, not consumption per day. Use consumption differences or an appropriate utility meter for that quantity.
