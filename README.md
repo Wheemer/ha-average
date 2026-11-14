@@ -229,7 +229,8 @@ sensor:
 
 This combines the weather entity's `humidity` attribute with the local sensor's
 numeric state. The mapping works for instantaneous and history averages, alongside
-source weights. A missing or invalid selected attribute is an invalid reading;
+source weights. History includes attribute-only updates even when the entity's
+main state stays unchanged. A missing or invalid selected attribute is an invalid reading;
 strict mode becomes unavailable immediately, even if the weather condition still
 says `sunny`.
 
@@ -305,6 +306,10 @@ Use one of these combinations:
 
 A lone `start` or `end`, or all three period options together, is invalid.
 Durations must be positive. In the UI, put these values under **Advanced**.
+A missing, invalid, future or zero-length range makes a history sensor unavailable;
+it does not substitute a current-value average. Source-dependent templates recover
+on a later update when their boundary values become valid. Datetimes without a
+timezone use Home Assistant's configured timezone.
 
 ```yaml
 # Last 5 minutes
