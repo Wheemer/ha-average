@@ -312,11 +312,14 @@ Isolated test results do not establish that a particular live installation has
 completed a shutdown without errors. Repository updates, releases, and live
 installation updates are separate steps.
 
-## Credits And License
+## Credits and Support
 
-Based on [Limych/ha-average](https://github.com/Limych/ha-average), originally
-created by Andrey “Limych” Khrolenok. This fork retains the original attribution
-and incorporates contributions credited in its Git history.
+Average Sensor was originally created by [Andrey “Limych” Khrolenok](https://github.com/Limych).
+This fork builds on his work, with the original attribution and license retained.
+
+If you'd like to support the original author, visit [Limych's Patreon](https://www.patreon.com/limych).
+
+## License
 
 Licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0
 International (CC BY-NC-SA 4.0)**. See [LICENSE.md](LICENSE.md) for the full terms.
