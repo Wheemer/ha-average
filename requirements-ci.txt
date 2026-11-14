@@ -1,4 +1,4 @@
 # Keep the Core-maintained fixture version aligned with our tested Core series.
 pytest-homeassistant==2026.11.1
-pytest-cov>=3.0
+pytest-cov>=7.1.0
 ruff==0.17.5
