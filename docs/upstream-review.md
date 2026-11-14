@@ -32,13 +32,13 @@ closed by us in July without upstream merge. Its fix is already in this fork.
 | [243](https://github.com/Limych/ha-average/issues/243) | Reproduced and fixed rounded-end caching of unavailable, partial and current-value-fallback results; these now retry at the configured interval instead of requiring a reload. Successful complete closed windows remain cached. Changed active YAML now reloads the affected loaded entry, including source edits with an explicit unique ID and non-identity option edits using a stable generated import ID. Unchanged YAML avoids needless entry reloads. Restored source counts no longer override the configured list, fixing strict-mode unavailability after a source-count edit. The native Quick Reload handler preserves identity and working source listeners with YAML active or commented out; other installation-specific causes remain unproven. No automatic deletion of imported entries. Import notices now direct users to verify identities/settings/history before commenting out YAML for UI management. |
 | [225](https://github.com/Limych/ha-average/issues/225) | Backlog: seasonal accumulated temperature is a separate aggregation, not the current arithmetic/time-weighted mean. |
 | [223](https://github.com/Limych/ha-average/issues/223) | Backlog: long-term statistics support; raw recorder retention limitation documented. No silent switch to hourly statistics. |
-| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Lazy recorder-state decoding now runs in the recorder executor, and cancelled refreshes cannot start replacement queries while their original SQL job is still running. Ordinary numeric history also omits unused attributes and their SQL join; completed source lists are released before the next query loads. Database-specific query cost remains a follow-up. |
+| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Lazy recorder-state decoding now runs in the recorder executor, and cancelled refreshes cannot start replacement queries while their original SQL job is still running. Ordinary numeric history also omits unused attributes and their SQL join; completed source lists are released before the next query loads. A malformed-temperature history traceback storm is now also bounded to a first error and count summary per source/calculation. Database-specific query cost remains a follow-up. |
 | [217](https://github.com/Limych/ha-average/issues/217) | Not reproduced on current Core: real native configuration checks finish for instantaneous, duration and template-range YAML, without creating entries/states. Bounded regression tests cover the path. The upstream reporter noted that a Core/integration update resolved their old hang; no speculative workaround added. |
 | [185](https://github.com/Limych/ha-average/issues/185) | Unit-based temperature detection and metadata recovery covered, including sources with statistics-style metadata. |
 | [184](https://github.com/Limych/ha-average/issues/184) | Backlog: hourly sampling changes averaging semantics and needs a separate explicit mode. |
 | [183](https://github.com/Limych/ha-average/issues/183) | All calculation options are editable in Advanced, including legacy age/fallback and history-gap controls; native round-trip/explicit-clear checks preserve values and identity. |
 | [175](https://github.com/Limych/ha-average/issues/175) | Reproduced a startup TypeError when a source-dependent period template returned None. Missing boundaries now remain unavailable without startup errors; invalid/future/zero-length periods cannot fall back to an instantaneous value or reuse a stale previous period. Valid boundaries recover through normal updates. The broader unspecified startup report is not claimed fully resolved. |
-| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; lazy attribute/timestamp decoding now runs in the recorder executor. Cancellation retains the active query until its executor job completes, preventing overlapping replacement SQL work. Unused numeric-history attributes and an unnecessary timestamp conversion are now omitted, and source-history lists are released before loading the next source. Database-specific long-window cost and the original ten-second warning remain separate validation work. |
+| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; lazy attribute/timestamp decoding now runs in the recorder executor. Cancellation retains the active query until its executor job completes, preventing overlapping replacement SQL work. Unused numeric-history attributes and an unnecessary timestamp conversion are now omitted, and source-history lists are released before loading the next source. A separate malformed-temperature history reproduced Core's actual ten-second slow-update warning; bounded error logging removed that warning in the isolated workload. The original reporter's cause and database-specific long-window cost remain unproven. |
 | [143](https://github.com/Limych/ha-average/issues/143) | Stacked temperature-unit metadata recovery covered. |
 | [123](https://github.com/Limych/ha-average/issues/123) | Intentional preservation: removing YAML does not delete imported entries or history. Remove unwanted entries explicitly from Integrations. Regression checks preserve entry and entity identity. |
 | [109](https://github.com/Limych/ha-average/issues/109) | Partial averages skip unavailable/unknown sources; restore/recovery and invalid-value checks covered. New undefined-history flags support explicit gap policy. Original screenshot not reproduced. |
@@ -221,3 +221,51 @@ case's savings. No records are sampled, truncated or replaced by statistics.
 No configuration fields, default intervals or identities change: existing YAML
 and all UI controls retain their meanings. No live installation was accessed.
 A ten-second query guarantee or database-driver timeout is not implied.
+
+
+## Calculation and malformed-history timeout follow-up (#168 / #222)
+
+Profiling 100,000 points found repeated source-kind detection in the inner
+calculation loop. Each history source now reuses the attribute/state timestamp
+choice already determined for its query. Instantaneous and other extraction
+callers keep their existing automatic source-kind detection. The loop still
+processes every point, retains the existing rounded extrema/count behavior and
+yields after each processing batch.
+
+A more substantial reproduced failure was a traceback storm: every malformed
+historical temperature or unsupported recorded unit logged an exception, often
+tens of thousands per calculation. Each source now logs its first conversion
+traceback and one count summary for repeated failures in that calculation. Error
+budgets reset for each calculation, so persistent problems remain visible and
+other sources retain their own diagnostics. Invalid values, undefined-interval
+policies and recovery values are handled exactly as before. Normal recorder and
+SQL errors still propagate rather than being covered by this log limit.
+
+Four regressions cover malformed values and unsupported units through both
+ordinary temperature states and explicitly selected temperature attributes.
+They verify per-source logging bounds, first-error tracebacks, failure counts,
+subsequent-calculation reporting, valid intervals and later recovery. They fail
+against the previous code (1,002 tracebacks instead of two in the first case).
+
+A separate isolated native Core experiment called `Entity.async_device_update`
+on 100,000 synthetic historical temperatures, half malformed and half valid.
+The previous implementation emitted 50,001 conversion tracebacks and Core's
+actual `Update of sensor.performance_probe is taking over 10 seconds` warning.
+In the final paired run it took 11.186 seconds; the fixed calculation took 0.450
+seconds, emitted one traceback plus one summary and no slow-update warning.
+The mean, count, extrema, source availability, native unit and trend were equal.
+This is one paired processing/log-formatting experiment, with in-memory recorder
+results; it is not a SQL benchmark, live measurement or a general timing bound.
+An earlier independent paired run also reproduced the Core warning.
+
+Three-run processing-only benchmarks with valid data measured medians of
+0.35333 → 0.31693 seconds for 100,000 ordinary numeric points and
+0.49472 → 0.48718 seconds for 100,000 temperature points. These modest healthy-data
+changes are separate from the malformed-history logging improvement. All
+benchmarks format logs without writing to a live logger or installation.
+
+These are concrete timeout-triggering and CPU-overhead fixes, not proof of the
+original reporter's precise cause. Database-specific SQL delays remain workload
+dependent. No timeout controls, new modes, settings, sampling, defaults or IDs
+were introduced. Existing YAML and UI controls remain supported; no live
+installation was accessed or changed.
