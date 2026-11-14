@@ -40,18 +40,31 @@ def history_sensor(hass, size=10000):
     return sensor, recorder
 
 
-async def test_large_history_yields_before_finishing_and_keeps_mean(hass):
+@pytest.mark.parametrize("size", [10000, 100000])
+async def test_large_history_yields_before_finishing_and_keeps_mean(hass, size):
     """Other HA callbacks can run before all historical points are processed."""
-    sensor, recorder = history_sensor(hass)
+    sensor, recorder = history_sensor(hass, size=size)
     observed = []
-    asyncio.get_running_loop().call_soon(lambda: observed.append(sensor.count))
-    with patch("custom_components.average.sensor.get_instance", return_value=recorder):
-        await sensor._async_update_state()
-    await asyncio.sleep(0)
+
+    async def observe() -> None:
+        while not sensor.count:  # noqa: ASYNC110 - observe a cooperative batch boundary
+            await asyncio.sleep(0)
+        observed.append(sensor.count)
+
+    observer = asyncio.create_task(observe())
+    try:
+        with patch(
+            "custom_components.average.sensor.get_instance", return_value=recorder
+        ):
+            await sensor._async_update_state()
+        await observer
+    finally:
+        observer.cancel()
+        await asyncio.gather(observer, return_exceptions=True)
     assert observed
-    assert 0 < observed[0] < 10000
+    assert 0 < observed[0] < size
     assert sensor.native_value == 30
-    assert sensor.count == 10001
+    assert sensor.count == size + 1
     assert sensor.min_value == 20
     assert sensor.max_value == 40
     assert sensor.trending_towards == 30

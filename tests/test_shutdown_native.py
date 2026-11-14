@@ -76,6 +76,7 @@ class ShutdownTests(unittest.IsolatedAsyncioTestCase):
         self.hass.set_state(CoreState.stopping)
         with (
             patch.dict(namespace, get_instance=lambda hass: self.recorder),
+            patch.object(module, "get_instance", return_value=self.recorder),
             self.assertRaisesRegex(
                 RuntimeError, "cannot schedule new futures after shutdown"
             ),

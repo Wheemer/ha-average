@@ -1,11 +1,14 @@
 """Real SQLite recorder coverage for attribute-only reading changes."""
 
 import asyncio
+import importlib
+import threading
 from datetime import timedelta
 from functools import partial
+from unittest.mock import patch
 
 import pytest
-from homeassistant.components.recorder import get_instance, history
+from homeassistant.components.recorder import get_instance, history, models
 from homeassistant.components.recorder.tasks import SynchronizeTask
 from homeassistant.helpers.recorder import async_initialize_recorder
 from homeassistant.helpers.template import Template
@@ -34,7 +37,7 @@ async def commit_recording(hass, recorder):
         ("sensor", False),
     ],
 )
-async def test_real_recorder_attribute_changes_are_included(
+async def test_real_recorder_attribute_changes_are_included(  # noqa: PLR0915
     hass, tmp_path, freezer, domain, selected
 ):
     """Attribute sources retain updates; numeric-state sources retain their path."""
@@ -93,7 +96,20 @@ async def test_real_recorder_attribute_changes_are_included(
     if attribute:
         config["source_attributes"] = {entity_id: attribute}
     sensor = AverageSensor(hass, config)
-    await sensor._async_update_state()
+    decode_threads = []
+    state_module = importlib.import_module(models.LazyState.__module__)
+    original_decode = state_module.decode_attributes_from_source
+
+    def decode(*args: object) -> dict:
+        decode_threads.append(threading.get_ident())
+        return original_decode(*args)
+
+    with patch.object(
+        state_module, "decode_attributes_from_source", side_effect=decode
+    ):
+        await sensor._async_update_state()
+    assert decode_threads
+    assert threading.get_ident() not in decode_threads
     assert sensor.native_value == expected
     assert sensor.max_datetime == changed_at
     assert sensor.native_unit_of_measurement == unit
