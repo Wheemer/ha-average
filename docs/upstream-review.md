@@ -32,13 +32,13 @@ closed by us in July without upstream merge. Its fix is already in this fork.
 | [243](https://github.com/Limych/ha-average/issues/243) | Reproduced and fixed rounded-end caching of unavailable, partial and current-value-fallback results; these now retry at the configured interval instead of requiring a reload. Successful complete closed windows remain cached. Changed active YAML now reloads the affected loaded entry, including source edits with an explicit unique ID and non-identity option edits using a stable generated import ID. Unchanged YAML avoids needless entry reloads. Restored source counts no longer override the configured list, fixing strict-mode unavailability after a source-count edit. The native Quick Reload handler preserves identity and working source listeners with YAML active or commented out; other installation-specific causes remain unproven. No automatic deletion of imported entries. Import notices now direct users to verify identities/settings/history before commenting out YAML for UI management. |
 | [225](https://github.com/Limych/ha-average/issues/225) | Backlog: seasonal accumulated temperature is a separate aggregation, not the current arithmetic/time-weighted mean. |
 | [223](https://github.com/Limych/ha-average/issues/223) | Backlog: long-term statistics support; raw recorder retention limitation documented. No silent switch to hourly statistics. |
-| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Lazy recorder-state decoding now runs in the recorder executor, and cancelled refreshes cannot start replacement queries while their original SQL job is still running. Ordinary numeric history also omits unused attributes and their SQL join; completed source lists are released before the next query loads. A malformed-temperature history traceback storm is now also bounded to a first error and count summary per source/calculation. MariaDB and PostgreSQL query/lock/statement-timeout experiments now also cover the database paths. Entry reloads retain the pending-query guard across replacement entities; database-specific query duration remains workload dependent. |
+| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Lazy recorder-state decoding now runs in the recorder executor, and cancelled refreshes cannot start replacement queries while their original SQL job is still running. Ordinary numeric history also omits unused attributes and their SQL join; completed source lists are released before the next query loads. A malformed-temperature history traceback storm is now also bounded to a first error and count summary per source/calculation. MariaDB and PostgreSQL query/lock/statement-timeout experiments now also cover the database paths. Entry reloads retain the pending-query guard across replacement entities. The completed three-backend start-boundary/SQL-plan audit found no additional integration defect; remaining reporter-specific diagnosis needs a failing workload or query trace. |
 | [217](https://github.com/Limych/ha-average/issues/217) | Not reproduced on current Core: real native configuration checks finish for instantaneous, duration and template-range YAML, without creating entries/states. Bounded regression tests cover the path. The upstream reporter noted that a Core/integration update resolved their old hang; no speculative workaround added. |
 | [185](https://github.com/Limych/ha-average/issues/185) | Unit-based temperature detection and metadata recovery covered, including sources with statistics-style metadata. |
 | [184](https://github.com/Limych/ha-average/issues/184) | Backlog: hourly sampling changes averaging semantics and needs a separate explicit mode. |
 | [183](https://github.com/Limych/ha-average/issues/183) | All calculation options are editable in Advanced, including legacy age/fallback and history-gap controls; native round-trip/explicit-clear checks preserve values and identity. |
 | [175](https://github.com/Limych/ha-average/issues/175) | Reproduced a startup TypeError when a source-dependent period template returned None. Missing boundaries now remain unavailable without startup errors; invalid/future/zero-length periods cannot fall back to an instantaneous value or reuse a stale previous period. Valid boundaries recover through normal updates. The broader unspecified startup report is not claimed fully resolved. |
-| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; lazy attribute/timestamp decoding now runs in the recorder executor. Cancellation retains the active query until its executor job completes, preventing overlapping replacement SQL work. Unused numeric-history attributes and an unnecessary timestamp conversion are now omitted, and source-history lists are released before loading the next source. A separate malformed-temperature history reproduced Core's actual ten-second slow-update warning; bounded error logging removed that warning in the isolated workload. The original reporter's cause and database-specific long-window cost remain unproven. |
+| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; lazy attribute/timestamp decoding now runs in the recorder executor. Cancellation retains the active query until its executor job completes, preventing overlapping replacement SQL work. Unused numeric-history attributes and an unnecessary timestamp conversion are now omitted, and source-history lists are released before loading the next source. A separate malformed-temperature history reproduced Core's actual ten-second slow-update warning; bounded error logging removed that warning in the isolated workload. The original reporter's cause remains unproven. A completed three-backend start-boundary/SQL-plan audit found no additional integration defect; further diagnosis needs the failing workload and timings. |
 | [143](https://github.com/Limych/ha-average/issues/143) | Stacked temperature-unit metadata recovery covered. |
 | [123](https://github.com/Limych/ha-average/issues/123) | Intentional preservation: removing YAML does not delete imported entries or history. Remove unwanted entries explicitly from Integrations. Regression checks preserve entry and entity identity. |
 | [109](https://github.com/Limych/ha-average/issues/109) | Partial averages skip unavailable/unknown sources; restore/recovery and invalid-value checks covered. New undefined-history flags support explicit gap policy. Original screenshot not reproduced. |
@@ -324,3 +324,49 @@ backend-specific query defect or universal query-time bound was established by
 these experiments. YAML compatibility, UI controls, defaults, calculations and
 identities remain unchanged. The temporary database containers were removed
 after validation; no live installation was accessed.
+
+
+## Completed start-boundary SQL-plan audit (#168 / #222)
+
+A follow-up audit explicitly exercised the initial-state branch of Core's history
+queries as well as the bulk history range. Earlier throughput benchmarks had
+focused on bulk range retrieval; their figures do not describe every SQL branch.
+The new fixture contains 100,000 target state changes, one preceding initial
+value, and 90,000 changes belonging to nine unrelated entities. Direct fixture
+inserts are followed by refreshing Core's oldest-state cache on its recorder
+thread, so initial-state retrieval and its `UNION ALL` are demonstrably enabled.
+
+Three runs of each path returned exactly 100,001 points, including the expected
+initial value and identical state/time sequences. The numeric, temperature and
+all-attribute-update query paths all preserved the history. Query-and-decode
+medians in the isolated Core 2026.11.1 environment were:
+
+| Backend | Numeric path | Temperature path | Attribute-update path |
+| --- | ---: | ---: | ---: |
+| SQLite | 0.5580 s | 0.9985 s | 1.0470 s |
+| MariaDB 11.4.13 | 0.7599 s | 1.3536 s | 1.3554 s |
+| PostgreSQL 16.16 | 0.5810 s | 1.0767 s | 1.1306 s |
+
+These are query/decoding measurements, not full entity-update timings or timing
+guarantees. SQL plans were inspected with SQLite `EXPLAIN QUERY PLAN`, MariaDB
+`EXPLAIN FORMAT=JSON`, and PostgreSQL `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` in
+the disposable databases only.
+
+SQLite used Core's metadata/time index for initial and range lookups, with a
+temporary B-tree for final ordering. MariaDB chose an indexed initial lookup and
+a table scan for the broad range, followed by materialization/sorting; that plan
+choice alone does not establish an integration bug. PostgreSQL used the
+metadata/time index for both branches, with a final external merge sort: the
+numeric path used 4,120 KiB of disk sort space, the temperature path 58,920 KiB,
+and the attribute path 57,936 KiB. This demonstrates a remaining SQL cost in
+Core's history query and the database planner, without identifying another
+incorrect query issued by this integration.
+
+No additional integration defect was reproduced, and no further SQL code change
+is justified by these results alone. The unresolved parts of #168/#222 require a
+failing configuration/data workload and query timings/plan to distinguish another
+integration problem from backend I/O, lock, sort or capacity limits. They remain
+unverified reports rather than additional confirmed fixes waiting to be applied.
+The fork's averaging code, YAML compatibility and UI configuration are unchanged
+by this audit. No database tuning, indexes, timeouts or live settings were changed.
+Both temporary database containers were stopped and removed after the audit.
