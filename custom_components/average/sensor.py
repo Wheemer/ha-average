@@ -353,6 +353,7 @@ class AverageSensor(RestoreSensor):
         self._last_history_metadata = None
         self._stopping = False
         self._temperature_mode = None
+        self._temperature_conversion_errors: dict[str, int] = {}
         self._actual_end = None
 
         self.hass = hass
@@ -595,7 +596,15 @@ class AverageSensor(RestoreSensor):
                 float(temperature), entity_unit, ha_unit
             )
         except (HomeAssistantError, TypeError, ValueError):
-            _LOGGER.exception('Could not convert value "%s" to float', state)
+            failures = self._temperature_conversion_errors.get(state.entity_id, 0) + 1
+            self._temperature_conversion_errors[state.entity_id] = failures
+            if failures == 1:
+                _LOGGER.exception(
+                    'Could not convert value "%s" to float; further temperature '
+                    "conversion errors for this source are summarized for this "
+                    "calculation",
+                    state,
+                )
             return None
 
         return temperature
@@ -621,13 +630,13 @@ class AverageSensor(RestoreSensor):
             return state.attributes.get(attribute)
         return self._get_temperature(state) if self._temperature_mode else state.state
 
-    def _get_state_value(self, state: State) -> float | None:
+    def _get_state_value(
+        self, state: State, *, uses_attributes: bool | None = None
+    ) -> float | None:
         """Return value of given entity state and count some sensor attributes."""
-        state_dt_changed = (
-            state.last_updated
-            if self._uses_attribute_value(state.entity_id)
-            else state.last_changed
-        )
+        if uses_attributes is None:
+            uses_attributes = self._uses_attribute_value(state.entity_id)
+        state_dt_changed = state.last_updated if uses_attributes else state.last_changed
         state = self._get_source_value(state)
         if not self._has_state(state):
             return self._undef
@@ -915,6 +924,7 @@ class AverageSensor(RestoreSensor):
         ):
             return
         _LOGGER.debug('Updating sensor "%s"', self.name)
+        self._temperature_conversion_errors.clear()
         p_period = self._period
 
         # Parse templates
@@ -1032,7 +1042,9 @@ class AverageSensor(RestoreSensor):
                 last_state = None
                 last_time = start_ts
                 if item is not None and self._has_state(item.state):
-                    last_state = self._get_state_value(item)
+                    last_state = self._get_state_value(
+                        item, uses_attributes=uses_attributes
+                    )
 
                 # Get the other states
                 for index, item in enumerate(history_list[entity_id]):
@@ -1042,7 +1054,9 @@ class AverageSensor(RestoreSensor):
                         if self._stopping or self.hass.is_stopping:
                             return
                     _LOGGER.debug("Historical state: %s", item)
-                    current_state = self._get_state_value(item)
+                    current_state = self._get_state_value(
+                        item, uses_attributes=uses_attributes
+                    )
                     current_time = (
                         item.last_updated if uses_attributes else item.last_changed
                     ).timestamp()
@@ -1081,6 +1095,7 @@ class AverageSensor(RestoreSensor):
                     (trending_last_state, self._weights.get(entity_id, 1))
                 )
 
+        self._log_temperature_conversion_errors()
         self._attr_native_value = self._weighted_average(values)
         self._history_complete = (
             history_complete
@@ -1150,8 +1165,20 @@ class AverageSensor(RestoreSensor):
         )
         return int(average) if self._precision < 1 else average
 
+    def _log_temperature_conversion_errors(self) -> None:
+        """Report repeated failures once per source, rather than per history point."""
+        for entity_id, failures in self._temperature_conversion_errors.items():
+            if failures > 1:
+                _LOGGER.warning(
+                    'Temperature conversion failed %s times for "%s" during this '
+                    "calculation; see its first conversion error for details",
+                    failures,
+                    entity_id,
+                )
+
     def _update_state_no_period(self) -> None:
         """Update the sensor state then period is not set."""
+        self._temperature_conversion_errors.clear()
         self.available_sources = 0
         values = []
         self.count = 0
