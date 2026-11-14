@@ -27,6 +27,7 @@ and fixes maintained in [Wheemer/ha-average](https://github.com/Wheemer/ha-avera
 
 | Feature | Description |
 | --- | --- |
+| **Source attributes** | Select an attribute per source, such as weather humidity, while keeping unmapped sources on their normal reading. |
 | **Source weights** | Optionally set how much each source contributes; existing sensors keep equal weights. |
 | **Current averages** | Combine the current readings of multiple sources; update when a source changes. |
 | **History averages** | Calculate each source's time-weighted mean over a period, then combine the available source means equally. |
@@ -125,6 +126,7 @@ that reflects whether a partial reading is acceptable.
 | **Averaging window** | Use recorded history for a fixed duration. Leave unset for a current-value average. |
 | **Start / end time templates** | Use templates for a custom calculation period. |
 | **History update interval** | Minimum interval between history refreshes; defaults to 20 seconds. Actual refresh timing also depends on Home Assistant's polling schedule. |
+| **Source attributes** | Optional mapping of source IDs to attribute names, such as `weather.home: humidity`. |
 | **Source weights** | Optional mapping of configured source IDs to relative weights. Leave empty for equal weights. |
 | **Decimal places** | Decimal places used to round the result; defaults to 2. |
 
@@ -205,6 +207,44 @@ Do not change existing unique IDs or delete and recreate sensors as a migration
 shortcut. The historical `unique_id: __legacy__` setting remains supported for
 installations already using it; it is not recommended for new sensors.
 
+### Average humidity from weather and a local sensor
+
+Use **Advanced > Source attributes** to select an attribute for individual
+sources. Sources omitted from the mapping keep their normal reading: numeric
+entities use their state, and weather/climate/water-heater sources use their
+current temperature by default.
+
+```yaml
+sensor:
+  - platform: average
+    name: Combined Humidity
+    unique_id: combined_humidity
+    entities:
+      - weather.home
+      - sensor.room_humidity
+    source_attributes:
+      weather.home: humidity
+    require_all_sources: true
+```
+
+This combines the weather entity's `humidity` attribute with the local sensor's
+numeric state. The mapping works for instantaneous and history averages, alongside
+source weights. A missing or invalid selected attribute is an invalid reading;
+strict mode becomes unavailable immediately, even if the weather condition still
+says `sunny`.
+
+Recognized temperature attributes (`temperature`, `current_temperature`,
+`dew_point`, `apparent_temperature`) use temperature metadata and conversion.
+`humidity` and `current_humidity` use percentage humidity metadata. Weather
+`pressure` and `wind_speed` use their reported unit attributes. Other numeric
+attributes are supported; their unit is taken from `<attribute>_unit` when present,
+otherwise no unit is inferred. Only combine readings of the same quantity with
+compatible units; non-temperature units are not automatically normalized.
+
+Map explicitly listed entity IDs, not YAML group IDs. Clear the mapping to restore
+default readings. To start measuring a different quantity, create a new average
+rather than mixing different quantities in one sensor's existing recorder history.
+
 ### Weighted source contributions
 
 Under **Advanced > Source weights**, or with YAML `weights`, use relative weights
@@ -246,6 +286,7 @@ is applied. Clear the mapping to restore equal weighting.
 | `duration` | Unset | Averaging window as a time-period mapping, seconds, or a quoted duration string. |
 | `start` / `end` | Unset | Templates returning datetimes or timestamps. |
 | `scan_interval` | 20 seconds | Minimum interval between history refreshes. |
+| `source_attributes` | Unset | Mapping of explicitly configured source entity IDs to attribute names. Unmapped sources keep their default reading. |
 | `weights` | Unset | Mapping of explicitly configured source entity IDs to nonnegative relative weights. Omitted sources use weight 1. At least one source must have a positive weight. |
 | `precision` | `2` | Decimal places for the result. |
 | `max_source_age` | Unset | Exclude readings whose `last_updated` is older than this duration; strict mode becomes unavailable. |
@@ -307,7 +348,7 @@ source sensors**.
 
 - **History retention:** windows use raw recorder state history. Long-term statistics are not queried automatically. A monthly window needs the relevant raw history retained for that period.
 - **Large windows:** frequently changing sources can produce large queries. A longer update interval reduces frequency, but does not remove the cost of processing a large history. History processing yields periodically so other Home Assistant callbacks can run during long calculations.
-- **Temperature units:** weather, climate, and water-heater temperature attributes are interpreted in Home Assistant's configured temperature unit. Historical changes in those units are not reconstructed.
+- **Temperature units:** unmapped weather, climate, and water-heater temperatures retain the existing assumption that values use Home Assistant's configured unit. Explicit temperature-attribute selections use reported units when available. Historical unit changes cannot always be reconstructed.
 - **Compatible inputs:** use readings that represent the same quantity with compatible units. This integration does not perform arbitrary unit normalization for non-temperature values.
 - **Consumption totals:** averaging an increasing meter reading gives its average level, not consumption per day. Use consumption differences or an appropriate utility meter for that quantity.
 - **Other aggregations:** medians, trimmed averages, and automatic area/label selection are not currently implemented.

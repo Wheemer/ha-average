@@ -27,7 +27,8 @@
               "max_source_age": "Maximum source age",
               "process_undef_as": "Undefined value fallback",
               "ignore_undef": "Ignore undefined history intervals",
-              "calculate_to_now_undef": "Extend last valid history reading"
+              "calculate_to_now_undef": "Extend last valid history reading",
+              "source_attributes": "Source attributes"
             },
             "data_description": {
               "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
@@ -39,7 +40,8 @@
               "max_source_age": "Optional age limit based on the source last_updated time. Clear to disable. Strict mode requires every source to be fresh.",
               "process_undef_as": "Optional numeric substitute for undefined readings. Clear to omit undefined values. Never overrides Require every source.",
               "ignore_undef": "Allow averaging valid history intervals when the latest recorded reading is undefined. Does not override strict source availability.",
-              "calculate_to_now_undef": "Assume the last valid reading continues through undefined history intervals. Requires Ignore undefined history intervals."
+              "calculate_to_now_undef": "Assume the last valid reading continues through undefined history intervals. Requires Ignore undefined history intervals.",
+              "source_attributes": "Optional mapping such as weather.home: humidity. Unmapped sources keep their default reading. Combine compatible quantities and units; missing attributes are invalid readings. Clear the mapping to use defaults. To measure a different quantity, create a new average to keep its history separate."
             }
           }
         }
@@ -51,7 +53,8 @@
       "no_sources": "Select at least one source entity.",
       "invalid_duration": "Durations must be greater than zero. Clear an optional duration to disable it.",
       "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled.",
-      "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight."
+      "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight.",
+      "invalid_source_attributes": "Map configured source IDs to nonempty attribute names."
     }
   },
   "options": {
@@ -80,7 +83,8 @@
               "max_source_age": "Maximum source age",
               "process_undef_as": "Undefined value fallback",
               "ignore_undef": "Ignore undefined history intervals",
-              "calculate_to_now_undef": "Extend last valid history reading"
+              "calculate_to_now_undef": "Extend last valid history reading",
+              "source_attributes": "Source attributes"
             },
             "data_description": {
               "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
@@ -92,7 +96,8 @@
               "max_source_age": "Optional age limit based on the source last_updated time. Clear to disable. Strict mode requires every source to be fresh.",
               "process_undef_as": "Optional numeric substitute for undefined readings. Clear to omit undefined values. Never overrides Require every source.",
               "ignore_undef": "Allow averaging valid history intervals when the latest recorded reading is undefined. Does not override strict source availability.",
-              "calculate_to_now_undef": "Assume the last valid reading continues through undefined history intervals. Requires Ignore undefined history intervals."
+              "calculate_to_now_undef": "Assume the last valid reading continues through undefined history intervals. Requires Ignore undefined history intervals.",
+              "source_attributes": "Optional mapping such as weather.home: humidity. Unmapped sources keep their default reading. Combine compatible quantities and units; missing attributes are invalid readings. Clear the mapping to use defaults. To measure a different quantity, create a new average to keep its history separate."
             }
           }
         }
@@ -104,7 +109,8 @@
       "no_sources": "Select at least one source entity.",
       "invalid_duration": "Durations must be greater than zero. Clear an optional duration to disable it.",
       "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled.",
-      "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight."
+      "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight.",
+      "invalid_source_attributes": "Map configured source IDs to nonempty attribute names."
     }
   },
   "issues": {

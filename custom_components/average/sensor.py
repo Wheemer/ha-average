@@ -78,6 +78,7 @@ from homeassistant.util import slugify
 from homeassistant.util.unit_conversion import TemperatureConverter
 from homeassistant.util.unit_system import TEMPERATURE_UNITS
 
+from .attributes import normalize_source_attributes
 from .const import (
     ATTR_AVAILABLE_SOURCES,
     ATTR_COUNT,
@@ -97,6 +98,7 @@ from .const import (
     CONF_PRECISION,
     CONF_PROCESS_UNDEF_AS,
     CONF_REQUIRE_ALL_SOURCES,
+    CONF_SOURCE_ATTRIBUTES,
     CONF_START,
     CONF_WEIGHTS,
     DEFAULT_NAME,
@@ -131,6 +133,13 @@ def check_period_keys(conf: ConfigType) -> ConfigType:
             )
         except (TypeError, ValueError) as err:
             raise vol.Invalid(str(err)) from err
+    if CONF_SOURCE_ATTRIBUTES in conf:
+        try:
+            conf[CONF_SOURCE_ATTRIBUTES] = normalize_source_attributes(
+                conf[CONF_SOURCE_ATTRIBUTES], conf[CONF_ENTITIES]
+            )
+        except (TypeError, ValueError) as err:
+            raise vol.Invalid(str(err)) from err
     return conf
 
 
@@ -150,6 +159,7 @@ PLATFORM_SCHEMA = vol.All(
             vol.Optional(CONF_CALCULATE_TO_NOW_UNDEF, default=False): cv.boolean,
             vol.Optional(CONF_MAX_SOURCE_AGE): cv.positive_time_period,
             vol.Optional(CONF_WEIGHTS): dict,
+            vol.Optional(CONF_SOURCE_ATTRIBUTES): dict,
         }
     ),
     check_period_keys,
@@ -233,8 +243,9 @@ def _entry_config(hass: HomeAssistant, config_entry: ConfigEntry) -> ConfigType:
         CONF_REQUIRE_ALL_SOURCES: options.get(CONF_REQUIRE_ALL_SOURCES, False),
     }
 
-    if CONF_WEIGHTS in options:
-        config[CONF_WEIGHTS] = options[CONF_WEIGHTS]
+    for key in (CONF_WEIGHTS, CONF_SOURCE_ATTRIBUTES):
+        if key in options:
+            config[key] = options[key]
 
     for key in (CONF_IGNORE_UNDEF, CONF_CALCULATE_TO_NOW_UNDEF):
         config[key] = options.get(key, False)
@@ -300,6 +311,7 @@ class AverageSensor(RestoreSensor):
         self._precision = config.get(CONF_PRECISION, DEFAULT_PRECISION)
         self._undef = config.get(CONF_PROCESS_UNDEF_AS)
         self._weights = config.get(CONF_WEIGHTS, {})
+        self._source_attributes = config.get(CONF_SOURCE_ATTRIBUTES, {})
         self._ignore_undef = config.get(CONF_IGNORE_UNDEF, False)
         self._calculate_to_now_undef = config.get(CONF_CALCULATE_TO_NOW_UNDEF, False)
         self._require_all_sources = config.get(CONF_REQUIRE_ALL_SOURCES, False)
@@ -364,11 +376,7 @@ class AverageSensor(RestoreSensor):
                 state = self.hass.states.get(entity_id)
                 if state is None or self._is_source_stale(state, now):
                     return False
-                value = (
-                    self._get_temperature(state)
-                    if self._temperature_mode
-                    else state.state
-                )
+                value = self._get_source_value(state)
                 try:
                     if not math.isfinite(float(value)):
                         return False
@@ -526,7 +534,15 @@ class AverageSensor(RestoreSensor):
         """Get temperature value from entity."""
         ha_unit = self.hass.config.units.temperature_unit
         domain = split_entity_id(state.entity_id)[0]
-        if domain == WEATHER_DOMAIN:
+        if attribute := self._source_attributes.get(state.entity_id):
+            temperature = state.attributes.get(attribute)
+            source_unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+            entity_unit = (
+                state.attributes.get(f"{attribute}_unit")
+                or state.attributes.get("temperature_unit")
+                or (source_unit if source_unit in TEMPERATURE_UNITS else ha_unit)
+            )
+        elif domain == WEATHER_DOMAIN:
             temperature = state.attributes.get("temperature")
             entity_unit = ha_unit
         elif domain in (CLIMATE_DOMAIN, WATER_HEATER_DOMAIN):
@@ -547,16 +563,31 @@ class AverageSensor(RestoreSensor):
             temperature = TemperatureConverter.convert(
                 float(temperature), entity_unit, ha_unit
             )
-        except (HomeAssistantError, ValueError):
+        except (HomeAssistantError, TypeError, ValueError):
             _LOGGER.exception('Could not convert value "%s" to float', state)
             return None
 
         return temperature
 
+    def _get_source_value(self, state: State) -> Any:
+        """Read a selected attribute, or preserve the default state/temperature path."""
+        if not self._has_state(state.state):
+            return None
+        if attribute := self._source_attributes.get(state.entity_id):
+            if attribute in (
+                "temperature",
+                "current_temperature",
+                "dew_point",
+                "apparent_temperature",
+            ):
+                return self._get_temperature(state)
+            return state.attributes.get(attribute)
+        return self._get_temperature(state) if self._temperature_mode else state.state
+
     def _get_state_value(self, state: State) -> float | None:
         """Return value of given entity state and count some sensor attributes."""
         state_dt_changed = state.last_changed
-        state = self._get_temperature(state) if self._temperature_mode else state.state
+        state = self._get_source_value(state)
         if not self._has_state(state):
             return self._undef
 
@@ -714,6 +745,38 @@ class AverageSensor(RestoreSensor):
 
     def _init_mode(self, state: State) -> None:
         """Initialize sensor mode."""
+        if attribute := self._source_attributes.get(state.entity_id):
+            self._temperature_mode = attribute in (
+                "temperature",
+                "current_temperature",
+                "dew_point",
+                "apparent_temperature",
+            )
+            if self._temperature_mode:
+                self._attr_device_class = SensorDeviceClass.TEMPERATURE
+                self._attr_native_unit_of_measurement = (
+                    self.hass.config.units.temperature_unit
+                )
+            elif attribute in ("humidity", "current_humidity"):
+                self._attr_device_class = SensorDeviceClass.HUMIDITY
+                self._attr_native_unit_of_measurement = "%"
+            elif attribute == "pressure":
+                self._attr_device_class = SensorDeviceClass.PRESSURE
+                self._attr_native_unit_of_measurement = state.attributes.get(
+                    "pressure_unit"
+                )
+            elif attribute == "wind_speed":
+                self._attr_device_class = SensorDeviceClass.WIND_SPEED
+                self._attr_native_unit_of_measurement = state.attributes.get(
+                    "wind_speed_unit"
+                )
+            else:
+                self._attr_device_class = None
+                self._attr_native_unit_of_measurement = state.attributes.get(
+                    f"{attribute}_unit"
+                )
+            self._attr_icon = None
+            return
         if self._temperature_mode is True:
             return
 
@@ -727,6 +790,13 @@ class AverageSensor(RestoreSensor):
         )
 
         if self._temperature_mode is False and not temperature_mode:
+            if (
+                self._attr_native_unit_of_measurement is None
+                and unit_of_measurement is not None
+            ):
+                self._attr_native_unit_of_measurement = unit_of_measurement
+            if self._attr_device_class is None and device_class is not None:
+                self._attr_device_class = device_class
             return
 
         self._temperature_mode = temperature_mode
@@ -893,8 +963,14 @@ class AverageSensor(RestoreSensor):
         self._attr_native_value = self._weighted_average(values)
 
         current_average = self._weighted_average(last_values)
-        if current_average is not None and self._attr_native_value is not None:
-            part_of_period = (now_ts - start_ts) / (actual_end_ts - start_ts)
+        if (
+            current_average is not None
+            and self._attr_native_value is not None
+            and actual_end_ts > start_ts
+        ):
+            part_of_period = min(
+                1, max(0, (now_ts - start_ts) / (actual_end_ts - start_ts))
+            )
             to_now = self._attr_native_value * part_of_period
             to_end = current_average * (1 - part_of_period)
             self.trending_towards = to_now + to_end
