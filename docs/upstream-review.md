@@ -37,7 +37,7 @@ closed by us in July without upstream merge. Its fix is already in this fork.
 | [185](https://github.com/Limych/ha-average/issues/185) | Unit-based temperature detection and metadata recovery covered, including sources with statistics-style metadata. |
 | [184](https://github.com/Limych/ha-average/issues/184) | Backlog: hourly sampling changes averaging semantics and needs a separate explicit mode. |
 | [183](https://github.com/Limych/ha-average/issues/183) | All calculation options are editable in Advanced, including legacy age/fallback and history-gap controls; native round-trip/explicit-clear checks preserve values and identity. |
-| [175](https://github.com/Limych/ha-average/issues/175) | Missing/invalid source recovery covered; missing sources log at debug level. No forced zero fallback added. |
+| [175](https://github.com/Limych/ha-average/issues/175) | Reproduced a startup TypeError when a source-dependent period template returned None. Missing boundaries now remain unavailable without startup errors; invalid/future/zero-length periods cannot fall back to an instantaneous value or reuse a stale previous period. Valid boundaries recover through normal updates. The broader unspecified startup report is not claimed fully resolved. |
 | [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; long-window database/query cost and timeout behavior remain separate follow-up work. |
 | [143](https://github.com/Limych/ha-average/issues/143) | Stacked temperature-unit metadata recovery covered. |
 | [123](https://github.com/Limych/ha-average/issues/123) | Intentional preservation: removing YAML does not delete imported entries or history. Remove unwanted entries explicitly from Integrations. Regression checks preserve entry and entity identity. |
@@ -102,3 +102,24 @@ numeric current reading, so metadata arrival triggers recalculation without
 requerying a complete fixed window on every normal source update. Changes to
 Home Assistant's temperature unit also update the conversion target and published
 native unit together. No YAML/UI settings or entity identities are migrated.
+
+
+## Invalid-period and recorded-attribute bugs
+
+A source-dependent boundary template returning `None` raised `TypeError` at
+startup. A malformed boundary after a valid calculation reused the old period,
+and a future period could accidentally publish a current-value average. Period
+parsing now clears stale boundaries, accepts the documented datetime/timestamp
+forms, treats missing inputs as unavailable, and does not switch a configured
+history sensor to instantaneous averaging. Zero-length periods have no average.
+Naive datetimes are interpreted in Home Assistant's configured timezone. Invalid
+configured values still produce a useful error; missing source values do not.
+
+A separate real SQLite recorder regression showed that a weather condition
+remaining `sunny` caused attribute-only temperature and humidity updates to be
+omitted by the old history API. Attribute-based sources now query all recorded
+updates and use `last_updated` for weighting and extrema timestamps. Ordinary
+numeric-state sources retain the existing state-change query and timestamps.
+Native recorder tests cover weather, climate, water-heater, selected numeric
+attributes and ordinary numeric sensors, using a FIFO recorder commit barrier.
+The averaging formula and existing YAML/UI configuration fields are unchanged.

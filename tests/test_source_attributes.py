@@ -134,12 +134,19 @@ async def test_attribute_history_is_time_weighted_and_supports_source_weights(ha
     sensor._async_update_period = period
     history = {
         "weather.home": [
-            State("weather.home", "sunny", {"humidity": 40}, last_changed=start),
+            State(
+                "weather.home",
+                "sunny",
+                {"humidity": 40},
+                last_changed=start,
+                last_updated=start,
+            ),
             State(
                 "weather.home",
                 "cloudy",
                 {"humidity": 80},
                 last_changed=start + timedelta(seconds=15),
+                last_updated=start + timedelta(seconds=15),
             ),
         ],
         "sensor.humidity": [

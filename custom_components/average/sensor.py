@@ -16,12 +16,12 @@ import math
 import numbers
 from asyncio import sleep
 from contextlib import suppress
-from datetime import timedelta
+from datetime import datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from datetime import datetime
 
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.helpers.entity_platform import (
@@ -571,6 +571,12 @@ class AverageSensor(RestoreSensor):
 
         return temperature
 
+    def _uses_attribute_value(self, entity_id: str) -> bool:
+        """Identify readings that can change without changing the entity state."""
+        return bool(self._source_attributes.get(entity_id)) or split_entity_id(
+            entity_id
+        )[0] in (WEATHER_DOMAIN, CLIMATE_DOMAIN, WATER_HEATER_DOMAIN)
+
     def _get_source_value(self, state: State) -> Any:
         """Read a selected attribute, or preserve the default state/temperature path."""
         if not self._has_state(state.state):
@@ -588,7 +594,11 @@ class AverageSensor(RestoreSensor):
 
     def _get_state_value(self, state: State) -> float | None:
         """Return value of given entity state and count some sensor attributes."""
-        state_dt_changed = state.last_changed
+        state_dt_changed = (
+            state.last_updated
+            if self._uses_attribute_value(state.entity_id)
+            else state.last_changed
+        )
         state = self._get_source_value(state)
         if not self._has_state(state):
             return self._undef
@@ -670,8 +680,31 @@ class AverageSensor(RestoreSensor):
         else:
             _LOGGER.error('Error parsing template for field "%s": %s', field, exc)
 
-    async def _async_update_period(self) -> None:  # noqa: PLR0912
+    def _parse_period_boundary(self, value: Any, field: str) -> datetime | None:
+        """Parse a boundary without raising on sources missing during startup."""
+        if not self._has_state(value):
+            _LOGGER.debug('Period boundary "%s" is not available yet', field)
+            return None
+        parsed = value if isinstance(value, datetime) else None
+        if isinstance(value, str):
+            parsed = dt_util.parse_datetime(value)
+        if parsed is None:
+            with suppress(TypeError, ValueError, OverflowError, OSError):
+                parsed = dt_util.utc_from_timestamp(math.floor(float(value)))
+        if parsed is None:
+            _LOGGER.error(
+                'Parsing error: field "%s" must be a datetime or a timestamp', field
+            )
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(
+                tzinfo=dt_util.get_time_zone(self.hass.config.time_zone)
+            )
+        return dt_util.as_local(parsed)
+
+    async def _async_update_period(self) -> None:  # noqa: PLR0911, PLR0912
         """Parse the templates and calculate a datetime tuples."""
+        self._period = self.start = self.end = self._actual_end = None
         start = end = None
         now = dt_util.now()
 
@@ -683,18 +716,9 @@ class AverageSensor(RestoreSensor):
             except (TemplateError, TypeError) as ex:
                 self.handle_template_exception(ex, "start")
                 return
-            if isinstance(start_rendered, str):
-                start = dt_util.parse_datetime(start_rendered)
+            start = self._parse_period_boundary(start_rendered, "start")
             if start is None:
-                try:
-                    start = dt_util.as_local(
-                        dt_util.utc_from_timestamp(math.floor(float(start_rendered)))
-                    )
-                except ValueError:
-                    _LOGGER.exception(
-                        'Parsing error: field "start" must be a datetime or a timestamp'
-                    )
-                    return
+                return
 
         # Parse end
         if self._end_template is not None:
@@ -704,18 +728,9 @@ class AverageSensor(RestoreSensor):
             except (TemplateError, TypeError) as ex:
                 self.handle_template_exception(ex, "end")
                 return
-            if isinstance(end_rendered, str):
-                end = dt_util.parse_datetime(end_rendered)
+            end = self._parse_period_boundary(end_rendered, "end")
             if end is None:
-                try:
-                    end = dt_util.as_local(
-                        dt_util.utc_from_timestamp(math.floor(float(end_rendered)))
-                    )
-                except ValueError:
-                    _LOGGER.exception(
-                        'Parsing error: field "end" must be a datetime or a timestamp'
-                    )
-                    return
+                return
 
         # Calculate start or end using the duration
         if self._duration is not None:
@@ -740,6 +755,8 @@ class AverageSensor(RestoreSensor):
             # History hasn't been written yet for this period
             return
         end = min(end, now)  # No point in making stats of the future
+        if end <= start:
+            return
 
         self._period = start, end
         self.start = start
@@ -830,7 +847,15 @@ class AverageSensor(RestoreSensor):
             return
 
         if self._period is None:
-            self._update_state_no_period()
+            if self._has_period:
+                self._attr_native_value = None
+                self.available_sources = self.count = 0
+                self.min_value = self.max_value = None
+                self.min_datetime = self.max_datetime = self.trending_towards = None
+                self._history_complete = False
+                self._last_history_metadata = None
+            else:
+                self._update_state_no_period()
             return
 
         now = dt_util.now()
@@ -904,13 +929,27 @@ class AverageSensor(RestoreSensor):
             trending_last_state = None
 
             # Get history between start and now
-            history_list = await get_instance(self.hass).async_add_executor_job(
-                history.state_changes_during_period,
-                self.hass,
-                start,
-                end,
-                str(entity_id),
-            )
+            uses_attributes = self._uses_attribute_value(entity_id)
+            if uses_attributes:
+                query = partial(
+                    history.get_significant_states,
+                    self.hass,
+                    start,
+                    end,
+                    [entity_id],
+                    significant_changes_only=False,
+                )
+                history_list = await get_instance(self.hass).async_add_executor_job(
+                    query
+                )
+            else:
+                history_list = await get_instance(self.hass).async_add_executor_job(
+                    history.state_changes_during_period,
+                    self.hass,
+                    start,
+                    end,
+                    str(entity_id),
+                )
 
             if self._stopping or self.hass.is_stopping:
                 return
@@ -945,7 +984,9 @@ class AverageSensor(RestoreSensor):
                             return
                     _LOGGER.debug("Historical state: %s", item)
                     current_state = self._get_state_value(item)
-                    current_time = item.last_changed.timestamp()
+                    current_time = (
+                        item.last_updated if uses_attributes else item.last_changed
+                    ).timestamp()
 
                     if last_state is not None:
                         last_elapsed = current_time - last_time
