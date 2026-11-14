@@ -39,7 +39,10 @@ class FlowSectionTests(unittest.TestCase):
                 {
                     "entities": ["sensor.a"],
                     "require_all_sources": True,
-                    "advanced": {"scan_interval": {"seconds": 30}},
+                    "advanced": {
+                        "scan_interval": {"seconds": 30},
+                        "max_source_age": {"minutes": 2},
+                    },
                 },
             )
         )
@@ -108,6 +111,12 @@ class FlowSectionTests(unittest.TestCase):
         self.assertIsInstance(advanced["duration"], selector.DurationSelector)
         self.assertIsInstance(advanced["start"], selector.TemplateSelector)
         self.assertIsInstance(advanced["end"], selector.TemplateSelector)
+        self.assertIsInstance(advanced["max_source_age"], selector.DurationSelector)
+        self.assertIsInstance(advanced["process_undef_as"], selector.NumberSelector)
+        self.assertIsInstance(advanced["ignore_undef"], selector.BooleanSelector)
+        self.assertIsInstance(
+            advanced["calculate_to_now_undef"], selector.BooleanSelector
+        )
         self.assertNotEqual(
             json.loads((source.parent / "manifest.json").read_text()).get(
                 "integration_type"
@@ -150,7 +159,7 @@ class FlowSectionTests(unittest.TestCase):
             "scan_interval": {"seconds": 15},
         }
         for selected in (
-            {"advanced": {"precision": 4}},
+            {"advanced": {"precision": 4, "max_source_age": {"minutes": 2}}},
             {"require_all_sources": False},
         ):
             handler = SimpleNamespace(options=dict(old))
@@ -194,6 +203,47 @@ class FlowSectionTests(unittest.TestCase):
             with self.assertRaises(SchemaFlowError):
                 asyncio.run(module.validate_options(handler, submitted))
             self.assertEqual(handler.options, original)
+
+    def test_all_yaml_calculation_options_roundtrip_and_clear_in_ui(self):
+        original = {
+            "name": "Legacy average",
+            "entities": ["sensor.a"],
+            "unique_id": "stable",
+            "duration": {"minutes": 5},
+            "scan_interval": {"seconds": 30},
+            "precision": 3,
+            "require_all_sources": True,
+            "max_source_age": {"minutes": 2},
+            "process_undef_as": 0,
+            "ignore_undef": True,
+            "calculate_to_now_undef": True,
+            "weights": {"sensor.a": 2},
+        }
+        parent = SimpleNamespace(async_create_entry=lambda **kw: kw)
+        handler = SchemaCommonFlowHandler(parent, module.OPTIONS_FLOW, dict(original))
+        form = asyncio.run(module.suggested_options(handler))
+        form.pop("name")
+        form.pop("unique_id")
+        result = asyncio.run(handler.async_step("init", module.OPTIONS_SCHEMA(form)))[
+            "data"
+        ]
+        self.assertEqual(result, original)
+        # Clearing optional controls in the expanded section removes old values.
+        form["advanced"] = {"scan_interval": {"seconds": 30}, "precision": 3}
+        result = asyncio.run(handler.async_step("init", module.OPTIONS_SCHEMA(form)))[
+            "data"
+        ]
+        for key in (
+            "duration",
+            "max_source_age",
+            "process_undef_as",
+            "ignore_undef",
+            "calculate_to_now_undef",
+            "weights",
+        ):
+            self.assertNotIn(key, result)
+        self.assertEqual(result["unique_id"], "stable")
+        self.assertTrue(result["require_all_sources"])
 
 
 if __name__ == "__main__":

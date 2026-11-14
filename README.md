@@ -27,6 +27,7 @@ and fixes maintained in [Wheemer/ha-average](https://github.com/Wheemer/ha-avera
 
 | Feature | Description |
 | --- | --- |
+| **Source weights** | Optionally set how much each source contributes; existing sensors keep equal weights. |
 | **Current averages** | Combine the current readings of multiple sources; update when a source changes. |
 | **History averages** | Calculate each source's time-weighted mean over a period, then combine the available source means equally. |
 | **UI configuration** | Select sources, set availability behavior, and edit an existing sensor from Devices & services. |
@@ -124,11 +125,13 @@ that reflects whether a partial reading is acceptable.
 | **Averaging window** | Use recorded history for a fixed duration. Leave unset for a current-value average. |
 | **Start / end time templates** | Use templates for a custom calculation period. |
 | **History update interval** | Minimum interval between history refreshes; defaults to 20 seconds. Actual refresh timing also depends on Home Assistant's polling schedule. |
+| **Source weights** | Optional mapping of configured source IDs to relative weights. Leave empty for equal weights. |
 | **Decimal places** | Decimal places used to round the result; defaults to 2. |
 
-Maximum-source-age and undefined-value controls are supported through YAML and
-existing stored settings. They are preserved when editing options but are not
-shown in the normal form.
+All calculation settings are editable in the UI. **Advanced** also contains
+maximum source age, undefined-value fallback, and both undefined-history controls.
+Existing YAML settings are presented as saved; opening the form does not reset
+them. Clear an optional field to disable that setting.
 
 ## YAML Examples
 
@@ -180,14 +183,57 @@ sensor:
 
 ### Existing YAML installations
 
-YAML definitions are imported into config entries. Verify the resulting sensor
-and its identity before deciding whether to remove a definition. Removing YAML
-does **not** automatically delete the imported entry or its recorder history.
+YAML definitions are imported into config entries. A notice appears under
+Home Assistant **Repairs** after a successful import or recognition of an existing
+entry. Before switching to UI management:
+
+1. Find the imported entry under **Settings > Devices & services > Integrations > Average Sensor**.
+2. Verify the existing entity ID, unique ID, settings, units, recorder history and long-term statistics are intact.
+3. Comment out **only that sensor's Average Sensor YAML definition**. Keep the commented copy as a backup.
+4. Manage the sensor through **Configure** in the UI, then dismiss the import notice.
+
+The integration does not edit your YAML files. Removing or commenting out YAML
+does **not** delete its imported entry or recorder history. Do not delete and
+recreate the entry to switch configuration methods.
+
+You can also keep managing a sensor from YAML. Leave its definition active and
+make its changes there: active YAML is reimported on startup or YAML reload and
+may overwrite later UI edits. Use one configuration source for each sensor.
 Remove unwanted entries explicitly through **Devices & services**.
 
 Do not change existing unique IDs or delete and recreate sensors as a migration
 shortcut. The historical `unique_id: __legacy__` setting remains supported for
 installations already using it; it is not recommended for new sensors.
+
+### Weighted source contributions
+
+Under **Advanced > Source weights**, or with YAML `weights`, use relative weights
+for explicitly listed source entity IDs. For example, `2:1:1` gives one source
+half the contribution when all three are available:
+
+```yaml
+sensor:
+  - platform: average
+    name: Weighted Room Temperature
+    unique_id: weighted_room_temperature
+    entities:
+      - sensor.room_main_temperature
+      - sensor.room_window_temperature
+      - sensor.room_door_temperature
+    weights:
+      sensor.room_main_temperature: 2
+      sensor.room_window_temperature: 1
+      sensor.room_door_temperature: 1
+```
+
+Omitted weights default to `1`. Weight `0` removes a source's contribution to the
+result, but **Require every source** still requires it to have a valid reading.
+In partial mode, weights are renormalized over the sources with usable values;
+if only zero-weight sources remain, the average is unavailable. Invalid, negative,
+nonfinite, all-zero, and non-source weight mappings are rejected. When using
+weights, list the source entities explicitly rather than weighting a YAML group.
+For history averages, each source is time-weighted first, then its source weight
+is applied. Clear the mapping to restore equal weighting.
 
 ## Options Reference
 
@@ -200,6 +246,7 @@ installations already using it; it is not recommended for new sensors.
 | `duration` | Unset | Averaging window as a time-period mapping, seconds, or a quoted duration string. |
 | `start` / `end` | Unset | Templates returning datetimes or timestamps. |
 | `scan_interval` | 20 seconds | Minimum interval between history refreshes. |
+| `weights` | Unset | Mapping of explicitly configured source entity IDs to nonnegative relative weights. Omitted sources use weight 1. At least one source must have a positive weight. |
 | `precision` | `2` | Decimal places for the result. |
 | `max_source_age` | Unset | Exclude readings whose `last_updated` is older than this duration; strict mode becomes unavailable. |
 | `process_undef_as` | Unset | Substitute a configured number for undefined values during calculation. Does not bypass strict availability. |
@@ -259,11 +306,11 @@ source sensors**.
 ## Limitations
 
 - **History retention:** windows use raw recorder state history. Long-term statistics are not queried automatically. A monthly window needs the relevant raw history retained for that period.
-- **Large windows:** frequently changing sources can produce large queries. A longer update interval reduces frequency, but does not remove the cost of processing a large history.
+- **Large windows:** frequently changing sources can produce large queries. A longer update interval reduces frequency, but does not remove the cost of processing a large history. History processing yields periodically so other Home Assistant callbacks can run during long calculations.
 - **Temperature units:** weather, climate, and water-heater temperature attributes are interpreted in Home Assistant's configured temperature unit. Historical changes in those units are not reconstructed.
 - **Compatible inputs:** use readings that represent the same quantity with compatible units. This integration does not perform arbitrary unit normalization for non-temperature values.
 - **Consumption totals:** averaging an increasing meter reading gives its average level, not consumption per day. Use consumption differences or an appropriate utility meter for that quantity.
-- **Other aggregations:** weighted source contributions, medians, trimmed averages, and automatic area/label selection are not currently implemented.
+- **Other aggregations:** medians, trimmed averages, and automatic area/label selection are not currently implemented.
 
 For a single current-value aggregate, Home Assistant also has built-in helpers.
 History and Filter integrations can produce different results because their

@@ -39,10 +39,12 @@ from .const import (
     CONF_PROCESS_UNDEF_AS,
     CONF_REQUIRE_ALL_SOURCES,
     CONF_START,
+    CONF_WEIGHTS,
     DEFAULT_NAME,
     DEFAULT_PRECISION,
     DOMAIN,
 )
+from .weights import normalize_weights
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -59,6 +61,11 @@ SECTIONS = {
         CONF_END,
         CONF_SCAN_INTERVAL,
         CONF_PRECISION,
+        CONF_WEIGHTS,
+        CONF_MAX_SOURCE_AGE,
+        CONF_PROCESS_UNDEF_AS,
+        CONF_IGNORE_UNDEF,
+        CONF_CALCULATE_TO_NOW_UNDEF,
     ),
 }
 
@@ -66,13 +73,6 @@ SECTIONS = {
 async def suggested_options(handler: SchemaCommonFlowHandler) -> dict[str, Any]:
     """Present flat stored options in the collapsible form section."""
     options = dict(handler.options)
-    for key in (
-        CONF_MAX_SOURCE_AGE,
-        CONF_PROCESS_UNDEF_AS,
-        CONF_IGNORE_UNDEF,
-        CONF_CALCULATE_TO_NOW_UNDEF,
-    ):
-        options.pop(key, None)
     for section_name, keys in SECTIONS.items():
         options[section_name] = {
             key: options.pop(key) for key in keys if key in options
@@ -120,6 +120,14 @@ def _validate_period(user_input: dict[str, Any]) -> dict[str, Any]:
             if seconds <= 0:
                 raise SchemaFlowError(error)
 
+    if CONF_WEIGHTS in user_input:
+        try:
+            user_input[CONF_WEIGHTS] = normalize_weights(
+                user_input[CONF_WEIGHTS], user_input[CONF_ENTITIES]
+            )
+        except (TypeError, ValueError) as err:
+            error = "invalid_weights"
+            raise SchemaFlowError(error) from err
     return user_input
 
 
@@ -134,7 +142,7 @@ def _duration_to_selector(value: Any) -> dict[str, int] | None:
             "days": days,
             "hours": seconds // 3600,
             "minutes": seconds % 3600 // 60,
-            "seconds": seconds % 60,
+            "seconds": seconds % 60 + value.microseconds / 1_000_000,
         }
     return value
 
@@ -154,6 +162,9 @@ def _yaml_config_to_options(config: dict[str, Any]) -> dict[str, Any]:
         CONF_PRECISION: int(config.get(CONF_PRECISION, DEFAULT_PRECISION)),
         CONF_REQUIRE_ALL_SOURCES: config.get(CONF_REQUIRE_ALL_SOURCES, False),
     }
+
+    if CONF_WEIGHTS in config:
+        options[CONF_WEIGHTS] = config[CONF_WEIGHTS]
 
     if unique_id := config.get(CONF_UNIQUE_ID):
         options[CONF_UNIQUE_ID] = unique_id
@@ -205,15 +216,10 @@ async def validate_options(
 ) -> dict[str, Any]:
     """Validate the form while retaining the flat storage contract."""
     options = dict(user_input)
-    for key in (
-        CONF_REQUIRE_ALL_SOURCES,
-        CONF_MAX_SOURCE_AGE,
-        CONF_PROCESS_UNDEF_AS,
-        CONF_IGNORE_UNDEF,
-        CONF_CALCULATE_TO_NOW_UNDEF,
-    ):
-        if key in _handler.options:
-            options.setdefault(key, _handler.options[key])
+    if CONF_REQUIRE_ALL_SOURCES in _handler.options:
+        options.setdefault(
+            CONF_REQUIRE_ALL_SOURCES, _handler.options[CONF_REQUIRE_ALL_SOURCES]
+        )
     for section_name, keys in SECTIONS.items():
         selected = options.pop(section_name, None)
         if selected is None:
@@ -248,10 +254,17 @@ ADVANCED_SCHEMA = probatio.Schema(
         probatio.Optional(
             CONF_PRECISION, default=DEFAULT_PRECISION
         ): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0, max=6, step=1, mode=selector.NumberSelectorMode.BOX
-            )
+            selector.NumberSelectorConfig(step=1, mode=selector.NumberSelectorMode.BOX)
         ),
+        probatio.Optional(CONF_WEIGHTS): selector.ObjectSelector(),
+        probatio.Optional(CONF_MAX_SOURCE_AGE): selector.DurationSelector(
+            selector.DurationSelectorConfig(allow_negative=False)
+        ),
+        probatio.Optional(CONF_PROCESS_UNDEF_AS): selector.NumberSelector(
+            selector.NumberSelectorConfig(mode=selector.NumberSelectorMode.BOX)
+        ),
+        probatio.Optional(CONF_IGNORE_UNDEF): selector.BooleanSelector(),
+        probatio.Optional(CONF_CALCULATE_TO_NOW_UNDEF): selector.BooleanSelector(),
     }
 )
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import math
 import numbers
+from asyncio import sleep
 from contextlib import suppress
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -64,6 +65,7 @@ from homeassistant.core import (
     callback,
     split_entity_id,
 )
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
@@ -96,14 +98,17 @@ from .const import (
     CONF_PROCESS_UNDEF_AS,
     CONF_REQUIRE_ALL_SOURCES,
     CONF_START,
+    CONF_WEIGHTS,
     DEFAULT_NAME,
     DEFAULT_PRECISION,
     DOMAIN,
     UPDATE_MIN_TIME,
 )
+from .weights import normalize_weights
 
 _LOGGER = logging.getLogger(__name__)
 YAML_IMPORT_ISSUE_ID = "yaml_imported"
+HISTORY_PROCESSING_BATCH_SIZE = 512
 
 
 def check_period_keys(conf: ConfigType) -> ConfigType:
@@ -119,6 +124,13 @@ def check_period_keys(conf: ConfigType) -> ConfigType:
     if conf.get(CONF_CALCULATE_TO_NOW_UNDEF) and not conf.get(CONF_IGNORE_UNDEF):
         msg = "calculate_to_now_undef requires ignore_undef"
         raise vol.Invalid(msg)
+    if CONF_WEIGHTS in conf:
+        try:
+            conf[CONF_WEIGHTS] = normalize_weights(
+                conf[CONF_WEIGHTS], conf[CONF_ENTITIES]
+            )
+        except (TypeError, ValueError) as err:
+            raise vol.Invalid(str(err)) from err
     return conf
 
 
@@ -137,6 +149,7 @@ PLATFORM_SCHEMA = vol.All(
             vol.Optional(CONF_IGNORE_UNDEF, default=False): cv.boolean,
             vol.Optional(CONF_CALCULATE_TO_NOW_UNDEF, default=False): cv.boolean,
             vol.Optional(CONF_MAX_SOURCE_AGE): cv.positive_time_period,
+            vol.Optional(CONF_WEIGHTS): dict,
         }
     ),
     check_period_keys,
@@ -151,11 +164,16 @@ async def async_setup_platform(
     discovery_info: DiscoveryInfoType | None = None,  # noqa: ARG001
 ) -> None:
     """Set up platform."""
-    await hass.config_entries.flow.async_init(
+    result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": SOURCE_IMPORT},
         data=config,
     )
+    if result["type"] != FlowResultType.CREATE_ENTRY and not (
+        result["type"] == FlowResultType.ABORT
+        and result.get("reason") == "already_configured"
+    ):
+        return
     async_create_issue(
         hass,
         DOMAIN,
@@ -214,6 +232,9 @@ def _entry_config(hass: HomeAssistant, config_entry: ConfigEntry) -> ConfigType:
         CONF_PRECISION: int(options.get(CONF_PRECISION, DEFAULT_PRECISION)),
         CONF_REQUIRE_ALL_SOURCES: options.get(CONF_REQUIRE_ALL_SOURCES, False),
     }
+
+    if CONF_WEIGHTS in options:
+        config[CONF_WEIGHTS] = options[CONF_WEIGHTS]
 
     for key in (CONF_IGNORE_UNDEF, CONF_CALCULATE_TO_NOW_UNDEF):
         config[key] = options.get(key, False)
@@ -278,12 +299,14 @@ class AverageSensor(RestoreSensor):
         self._period = self.start = self.end = None
         self._precision = config.get(CONF_PRECISION, DEFAULT_PRECISION)
         self._undef = config.get(CONF_PROCESS_UNDEF_AS)
+        self._weights = config.get(CONF_WEIGHTS, {})
         self._ignore_undef = config.get(CONF_IGNORE_UNDEF, False)
         self._calculate_to_now_undef = config.get(CONF_CALCULATE_TO_NOW_UNDEF, False)
         self._require_all_sources = config.get(CONF_REQUIRE_ALL_SOURCES, False)
         self._max_source_age = config.get(CONF_MAX_SOURCE_AGE)
         self._update_interval = config.get(CONF_SCAN_INTERVAL, UPDATE_MIN_TIME)
         self._last_update = None
+        self._update_in_progress = False
         self._stopping = False
         self._temperature_mode = None
         self._actual_end = None
@@ -580,7 +603,12 @@ class AverageSensor(RestoreSensor):
 
     async def async_update(self) -> None:
         """Update the sensor state if it needed."""
-        if self._stopping or self.hass.is_stopping or not self._has_period:
+        if (
+            self._stopping
+            or self.hass.is_stopping
+            or not self._has_period
+            or self._update_in_progress
+        ):
             return
 
         now = dt_util.utcnow()
@@ -591,7 +619,11 @@ class AverageSensor(RestoreSensor):
             return
 
         self._last_update = now
-        await self._async_update_state()
+        self._update_in_progress = True
+        try:
+            await self._async_update_state()
+        finally:
+            self._update_in_progress = False
 
     @staticmethod
     def handle_template_exception(exc: Exception, field: str) -> None:
@@ -710,7 +742,7 @@ class AverageSensor(RestoreSensor):
             self._attr_native_unit_of_measurement = unit_of_measurement
             self._attr_icon = state.attributes.get(ATTR_ICON)
 
-    async def _async_update_state(self) -> None:  # noqa: PLR0912, PLR0915
+    async def _async_update_state(self) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         """Update the sensor state."""
         if self._stopping or self.hass.is_stopping:
             return
@@ -793,6 +825,9 @@ class AverageSensor(RestoreSensor):
                 str(entity_id),
             )
 
+            if self._stopping or self.hass.is_stopping:
+                return
+
             if (
                 entity_id not in history_list
                 or history_list[entity_id] is None
@@ -814,7 +849,12 @@ class AverageSensor(RestoreSensor):
                     last_state = self._get_state_value(item)
 
                 # Get the other states
-                for item in history_list.get(entity_id):
+                for index, item in enumerate(history_list[entity_id]):
+                    if index and index % HISTORY_PROCESSING_BATCH_SIZE == 0:
+                        # Keep HA state events and STOP callbacks responsive.
+                        await sleep(0)
+                        if self._stopping or self.hass.is_stopping:
+                            return
                     _LOGGER.debug("Historical state: %s", item)
                     current_state = self._get_state_value(item)
                     current_time = item.last_changed.timestamp()
@@ -842,25 +882,18 @@ class AverageSensor(RestoreSensor):
                 _LOGGER.debug("Historical average state: %s", value)
 
             if isinstance(value, numbers.Number):
-                values.append(value)
+                values.append((value, self._weights.get(entity_id, 1)))
                 self.available_sources += 1
 
             if isinstance(trending_last_state, numbers.Number):
-                last_values.append(trending_last_state)
+                last_values.append(
+                    (trending_last_state, self._weights.get(entity_id, 1))
+                )
 
-        if values:
-            self._attr_native_value = round(sum(values) / len(values), self._precision)
-            if self._precision < 1:
-                self._attr_native_value = int(self._attr_native_value)
-        else:
-            self._attr_native_value = None
+        self._attr_native_value = self._weighted_average(values)
 
-        if last_values:
-            current_average = round(
-                sum(last_values) / len(last_values), self._precision
-            )
-            if self._precision < 1:
-                current_average = int(current_average)
+        current_average = self._weighted_average(last_values)
+        if current_average is not None and self._attr_native_value is not None:
             part_of_period = (now_ts - start_ts) / (actual_end_ts - start_ts)
             to_now = self._attr_native_value * part_of_period
             to_end = current_average * (1 - part_of_period)
@@ -876,6 +909,17 @@ class AverageSensor(RestoreSensor):
             self.trending_towards,
             self._attr_native_unit_of_measurement,
         )
+
+    def _weighted_average(self, values: list[tuple[float, float]]) -> float | None:
+        """Combine source values, preserving equal weighting when unconfigured."""
+        if not values or not (scale := max(weight for _, weight in values)):
+            return None
+        total_weight = sum(weight / scale for _, weight in values)
+        average = round(
+            sum(value * (weight / scale) for value, weight in values) / total_weight,
+            self._precision,
+        )
+        return int(average) if self._precision < 1 else average
 
     def _update_state_no_period(self) -> None:
         """Update the sensor state then period is not set."""
@@ -906,15 +950,10 @@ class AverageSensor(RestoreSensor):
             _LOGGER.debug("Current state: %s", value)
 
             if isinstance(value, numbers.Number):
-                values.append(value)
+                values.append((value, self._weights.get(entity_id, 1)))
                 self.available_sources += 1
 
-        if values:
-            self._attr_native_value = round(sum(values) / len(values), self._precision)
-            if self._precision < 1:
-                self._attr_native_value = int(self._attr_native_value)
-        else:
-            self._attr_native_value = None
+        self._attr_native_value = self._weighted_average(values)
 
         _LOGGER.debug(
             "Total average state: %s %s",

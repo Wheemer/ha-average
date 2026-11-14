@@ -217,7 +217,7 @@ async def test_invalid_history_gap_combination_is_rejected(hass):
 
 
 async def test_undefined_options_survive_yaml_and_ui_edits():
-    """Hidden gap controls must retain their stored values through the simple form."""
+    """Gap controls must retain their stored values when Advanced is omitted."""
     old = _yaml_config_to_options(
         {
             "name": "test",
