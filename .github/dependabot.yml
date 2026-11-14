@@ -1,28 +1,25 @@
 version: 2
 updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-    groups:
-      github-actions:
-        patterns: ['*']
-  - package-ecosystem: pip
-    directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-    ignore:
-      # Core updates must remain aligned with our HACS minimum and CI baseline.
-      - dependency-name: homeassistant
-    groups:
-      development-tools:
-        update-types: [minor, patch]
-  - package-ecosystem: docker
-    directory: /tests
-    schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: ghcr.io/home-assistant/home-assistant
-        update-types: ['version-update:semver-major', 'version-update:semver-minor']
+- package-ecosystem: github-actions
+  directory: /
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 10
+  groups:
+    github-actions:
+      patterns:
+      - '*'
+- package-ecosystem: pip
+  directory: /
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 10
+  groups:
+    development-tools:
+      update-types:
+      - minor
+      - patch
+- package-ecosystem: docker
+  directory: /tests
+  schedule:
+    interval: weekly

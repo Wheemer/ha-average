@@ -31,7 +31,9 @@ class FlowSectionTests(unittest.TestCase):
             "scan_interval": {"seconds": 15},
             "max_source_age": {"minutes": 2},
         }
-        parent = SimpleNamespace(async_create_entry=lambda **kw: kw)
+        parent = SimpleNamespace(
+            show_advanced_options=True, async_create_entry=lambda **kw: kw
+        )
         handler = SchemaCommonFlowHandler(parent, module.OPTIONS_FLOW, dict(old))
         result = asyncio.run(
             handler.async_step(
@@ -93,7 +95,7 @@ class FlowSectionTests(unittest.TestCase):
         self.assertEqual(handler.options, old)
 
     def test_native_sections_selectors_and_integration_listing(self):
-        import probatio
+        probatio = module.schema_lib
         from homeassistant.helpers import selector
 
         self.assertIsInstance(module.OPTIONS_SCHEMA, probatio.Schema)
@@ -125,7 +127,7 @@ class FlowSectionTests(unittest.TestCase):
         )
 
     def test_invalid_template_is_rejected_by_native_selector(self):
-        import probatio
+        probatio = module.schema_lib
 
         with self.assertRaises(probatio.Invalid):
             module.ADVANCED_SCHEMA({"start": "{{"})
@@ -142,7 +144,9 @@ class FlowSectionTests(unittest.TestCase):
             "precision": 2,
             "require_all_sources": True,
         }
-        parent = SimpleNamespace(async_create_entry=lambda **kw: kw)
+        parent = SimpleNamespace(
+            show_advanced_options=True, async_create_entry=lambda **kw: kw
+        )
         handler = SchemaCommonFlowHandler(parent, module.OPTIONS_FLOW, dict(original))
         form = asyncio.run(module.suggested_options(handler))
         form.pop("name")
@@ -219,7 +223,9 @@ class FlowSectionTests(unittest.TestCase):
             "calculate_to_now_undef": True,
             "weights": {"sensor.a": 2},
         }
-        parent = SimpleNamespace(async_create_entry=lambda **kw: kw)
+        parent = SimpleNamespace(
+            show_advanced_options=True, async_create_entry=lambda **kw: kw
+        )
         handler = SchemaCommonFlowHandler(parent, module.OPTIONS_FLOW, dict(original))
         form = asyncio.run(module.suggested_options(handler))
         form.pop("name")

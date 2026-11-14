@@ -37,11 +37,15 @@ or credentials are needed. Keep generated `tests/testing_config/` out of commits
 
 ## GitHub Actions test environment
 
-CI builds `tests/Dockerfile`, installs the declared development/test dependencies,
-and runs Ruff and the complete suite with networking disabled. The image keeps
-its exact Home Assistant version after installing Core-maintained fixtures,
-which can pin a different patch release. The current base is Core 2026.11.1;
-`requirements-ci.txt` supplies the matching fixture series and lint version.
+CI installs the declared development/test dependencies on Python 3.14 and runs
+Ruff and the complete suite with two pytest workers. One job retains the exact
+Core-maintained fixture pins; a second deliberately tests the newer pytest-asyncio
+version in `requirements-test-latest.txt`. This exposes newer plugin updates to
+real tests without silently changing the fixture-baseline environment.
+
+`tests/Dockerfile` provides the isolated native Home Assistant equivalent for
+local validation. The current base is Core 2026.11.1. Use the build argument
+`--build-arg TEST_LATEST_PLUGINS=1` for the forward-compatibility environment.
 
 ```sh
 docker build -f tests/Dockerfile -t average-ci .

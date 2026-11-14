@@ -695,10 +695,13 @@ class AverageSensor(RestoreSensor):
     @property
     def _history_query_pending(self) -> bool:
         """Include an earlier entity instance's SQL job during an entry reload."""
-        return self._pending_history_query is not None or (
-            self._entry_id is not None
-            and self._entry_id in self.hass.data.get(DATA_PENDING_HISTORY, {})
-        )
+        if (
+            self._pending_history_query is not None
+            and not self._pending_history_query.done()
+        ):
+            return True
+        shared = self.hass.data.get(DATA_PENDING_HISTORY, {}).get(self._entry_id)
+        return shared is not None and not shared.done()
 
     async def async_update(self) -> None:
         """Update the sensor state if it needed."""

@@ -7,4 +7,4 @@ Keep credentials, tokens and private Home Assistant configuration out of public
 issues and pull requests.
 
 Security fixes are developed on `dev` and included in subsequent fork releases.
-The original integration's maintainer and sponsorship links remain in the README.
+Original-author attribution and licence information remain in the README and LICENSE.md.

@@ -1,5 +1,7 @@
 """Exercise the actual availability property without a Home Assistant runtime."""
 
+import __future__
+
 import ast
 import asyncio
 import math
@@ -21,7 +23,15 @@ method = next(
 )
 method.decorator_list = []
 ns = {"math": math, "dt_util": SimpleNamespace(utcnow=lambda: datetime.now(UTC))}
-exec(compile(ast.Module(body=[method], type_ignores=[]), "sensor.py", "exec"), ns)
+exec(
+    compile(
+        ast.Module(body=[method], type_ignores=[]),
+        "sensor.py",
+        "exec",
+        flags=__future__.annotations.compiler_flag,
+    ),
+    ns,
+)
 
 added = next(
     n
@@ -42,7 +52,15 @@ ns.update(
     EVENT_HOMEASSISTANT_STOP="homeassistant_stop",
     async_track_state_change_event=track,
 )
-exec(compile(ast.Module(body=[added], type_ignores=[]), "sensor.py", "exec"), ns)
+exec(
+    compile(
+        ast.Module(body=[added], type_ignores=[]),
+        "sensor.py",
+        "exec",
+        flags=__future__.annotations.compiler_flag,
+    ),
+    ns,
+)
 
 
 class RequireAllTests(unittest.TestCase):

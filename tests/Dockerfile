@@ -5,5 +5,7 @@ COPY requirements*.txt /tmp/
 RUN python -c "from importlib.metadata import version; from pathlib import Path; Path('/tmp/core-version').write_text(version('homeassistant'))" \
     && pip install --no-cache-dir -r /tmp/requirements-dev.txt \
     && pip install --no-cache-dir --no-deps "homeassistant==$(cat /tmp/core-version)"
+ARG TEST_LATEST_PLUGINS=0
+RUN if [ "$TEST_LATEST_PLUGINS" = "1" ]; then pip install --no-cache-dir --no-deps -r /tmp/requirements-test-latest.txt; fi
 WORKDIR /work
 ENTRYPOINT ["python"]
