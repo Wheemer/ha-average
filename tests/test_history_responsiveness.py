@@ -1,6 +1,7 @@
 """Large-history responsiveness and shutdown regression tests."""
 
 import asyncio
+import weakref
 from datetime import timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -150,3 +151,29 @@ async def test_completed_period_trend_does_not_extrapolate_into_the_past(hass):
         await sensor._async_update_state()
     assert sensor.native_value == 30
     assert sensor.trending_towards == 30
+
+
+async def test_previous_source_history_is_released_before_next_query(hass):
+    """Loading the next large source must not retain the preceding result list."""
+    sensor, recorder = history_sensor(hass, size=2)
+    hass.states.async_set("sensor.b", "40")
+    sensor.sources.append("sensor.b")
+    sensor.count_sources = 2
+    prior = None
+
+    class Records(list):
+        """Permit a weak reference to the source history list."""
+
+    async def query(*args: object) -> dict:
+        nonlocal prior
+        if prior is not None:
+            assert prior() is None
+        records = Records([State(args[-1], "30", last_changed=sensor._period[0])])
+        prior = weakref.ref(records)
+        return {args[-1]: records}
+
+    recorder.async_add_executor_job.side_effect = query
+    with patch("custom_components.average.sensor.get_instance", return_value=recorder):
+        await sensor._async_update_state()
+    assert sensor.native_value == 30
+    assert sensor.available_sources == 2
