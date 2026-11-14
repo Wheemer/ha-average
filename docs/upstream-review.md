@@ -29,7 +29,7 @@ closed by us in July without upstream merge. Its fix is already in this fork.
 | [267](https://github.com/Limych/ha-average/issues/267) | Reproduced a remaining closed-window cache path that blocked temperature metadata arriving after startup. Cache validity now includes source unit/device-class metadata and the configured temperature unit; native values and unit labels are recalculated together. Existing startup recovery tests retained. |
 | [263](https://github.com/Limych/ha-average/issues/263) | Clarified in README: time-weighted level of a cumulative total is not consumption per day. |
 | [256](https://github.com/Limych/ha-average/issues/256) | Source-loss recovery covered by native tests; weekly failure not reproduced. Needs a minimal failing trace/config rather than a claim of resolution. |
-| [243](https://github.com/Limych/ha-average/issues/243) | Reproduced and fixed rounded-end caching of unavailable, partial and current-value-fallback results; these now retry at the configured interval instead of requiring a reload. Successful complete closed windows remain cached. The native Quick Reload handler preserves identity and working source listeners with YAML active or commented out; other installation-specific causes remain unproven. No automatic deletion of imported entries. Import notices now direct users to verify identities/settings/history before commenting out YAML for UI management. |
+| [243](https://github.com/Limych/ha-average/issues/243) | Reproduced and fixed rounded-end caching of unavailable, partial and current-value-fallback results; these now retry at the configured interval instead of requiring a reload. Successful complete closed windows remain cached. Changed active YAML now reloads the affected loaded entry, including source edits with an explicit unique ID and non-identity option edits using a stable generated import ID. Unchanged YAML avoids needless entry reloads. Restored source counts no longer override the configured list, fixing strict-mode unavailability after a source-count edit. The native Quick Reload handler preserves identity and working source listeners with YAML active or commented out; other installation-specific causes remain unproven. No automatic deletion of imported entries. Import notices now direct users to verify identities/settings/history before commenting out YAML for UI management. |
 | [225](https://github.com/Limych/ha-average/issues/225) | Backlog: seasonal accumulated temperature is a separate aggregation, not the current arithmetic/time-weighted mean. |
 | [223](https://github.com/Limych/ha-average/issues/223) | Backlog: long-term statistics support; raw recorder retention limitation documented. No silent switch to hourly statistics. |
 | [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Overall query/CPU cost remains a follow-up. |
@@ -123,3 +123,32 @@ numeric-state sources retain the existing state-change query and timestamps.
 Native recorder tests cover weather, climate, water-heater, selected numeric
 attributes and ordinary numeric sensors, using a FIFO recorder commit barrier.
 The averaging formula and existing YAML/UI configuration fields are unchanged.
+
+
+## YAML reload, restored counts and source-age follow-up
+
+Real YAML reload tests reproduced saved options changing while the running entity
+kept its old source subscriptions. Reimports now schedule reload only for changed,
+loaded entries. Stable generated import IDs receive non-identity option updates
+as well as explicit-ID entries. Existing field-preservation behavior is retained;
+no imported settings are discarded or identities rewritten.
+
+A real options-flow test also reproduced a strict sensor becoming unavailable
+permanently after its source list shrank: restored `count_sources` overwrote the
+new configuration's source count. That diagnostic is now derived only from the
+configured expanded source list, while the existing entity/unique ID is retained.
+
+Configured `max_source_age` was ineffective for a quiet instantaneous sensor until
+another event occurred, and a cached closed-period partial average could retain
+an expired source. Age-limited instantaneous entities now use normal HA polling;
+entities without an age limit remain event-driven. Freshness changes invalidate
+history-cache reuse. Native polling tests publish expiry and recovery without
+restarting the integration or adding a custom timer.
+
+Compatibility checks found an unreleased regression from fractional-duration
+support: whole seconds were serialized as floats, altering generated YAML import
+IDs. Whole-second durations now retain the integer representation used at commit
+8ad400c. Golden identity tests cover seconds, minutes and days. Both the original
+and interim float representations are recognized on reimport without rewriting
+stored entry IDs or creating a second entry; fractional seconds remain supported.
+These fixes do not establish the cause of the weekly report in #256.

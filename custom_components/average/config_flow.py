@@ -13,12 +13,14 @@ from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.components.water_heater import DOMAIN as WATER_HEATER_DOMAIN
 from homeassistant.components.weather import DOMAIN as WEATHER_DOMAIN
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import (
     CONF_ENTITIES,
     CONF_NAME,
     CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
 )
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector
@@ -142,18 +144,21 @@ def _validate_period(user_input: dict[str, Any]) -> dict[str, Any]:
     return user_input
 
 
-def _duration_to_selector(value: Any) -> dict[str, int] | None:
+def _duration_to_selector(value: Any) -> dict[str, int | float] | None:
     """Convert YAML duration values to duration selector values."""
     if value in (None, ""):
         return None
     if isinstance(value, timedelta):
         days = value.days
         seconds = value.seconds
+        selector_seconds: int | float = seconds % 60
+        if value.microseconds:
+            selector_seconds += value.microseconds / 1_000_000
         return {
             "days": days,
             "hours": seconds // 3600,
             "minutes": seconds % 3600 // 60,
-            "seconds": seconds % 60 + value.microseconds / 1_000_000,
+            "seconds": selector_seconds,
         }
     return value
 
@@ -341,15 +346,38 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
             for entry in self._async_current_entries():
                 entry_options = _entry_options(entry)
                 if entry_options.get(CONF_UNIQUE_ID) == unique_id:
-                    merged_options = {**entry_options, **options}
-                    self.hass.config_entries.async_update_entry(
-                        entry,
-                        options=merged_options,
-                        title=self.async_config_entry_title(merged_options),
-                    )
+                    self._async_update_imported_entry(entry, options)
                     return self.async_abort(reason="already_configured")
 
         await self.async_set_unique_id(_import_unique_id(options))
-        self._abort_if_unique_id_configured()
+        identities = [self.unique_id]
+        duration = options.get(CONF_DURATION)
+        if isinstance(duration, dict) and isinstance(duration.get("seconds"), int):
+            # Recognize the interim float-seconds format without changing saved IDs.
+            interim = {
+                **options,
+                CONF_DURATION: {**duration, "seconds": float(duration["seconds"])},
+            }
+            identities.append(_import_unique_id(interim))
+        for identity in identities:
+            for entry in self._async_current_entries():
+                if entry.unique_id == identity:
+                    self._async_update_imported_entry(entry, options)
+                    return self.async_abort(reason="already_configured")
 
         return self.async_create_entry(data=options)
+
+    @callback
+    def _async_update_imported_entry(
+        self, entry: ConfigEntry, options: dict[str, Any]
+    ) -> None:
+        """Apply changed YAML to a loaded entry, without duplicate or no-op reloads."""
+        current = _entry_options(entry)
+        merged = {**current, **options}
+        if merged == current:
+            return
+        self.hass.config_entries.async_update_entry(
+            entry, options=merged, title=self.async_config_entry_title(merged)
+        )
+        if entry.state is ConfigEntryState.LOADED:
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)
