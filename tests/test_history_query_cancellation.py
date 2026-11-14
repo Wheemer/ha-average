@@ -116,3 +116,31 @@ async def test_detached_query_failure_is_logged_and_allows_recovery(hass, caplog
         sensor._last_update = None
         await sensor.async_update()
     assert sensor.native_value == 20
+
+
+@pytest.mark.parametrize("entry_id", [None, "completed_entry"])
+async def test_completed_executor_future_does_not_block_remaining_sources(
+    hass, entry_id
+):
+    """A finished SQL job is not pending while its cleanup callback is queued."""
+    hass.states.async_set("sensor.a", "30")
+    hass.states.async_set("sensor.b", "40")
+    sensor = AverageSensor(
+        hass,
+        {
+            "entities": ["sensor.a", "sensor.b"],
+            "duration": timedelta(minutes=5),
+            "require_all_sources": True,
+        },
+        entry_id=entry_id,
+    )
+    result = hass.loop.create_future()
+    result.set_result({})
+    recorder = Mock(async_add_executor_job=Mock(return_value=result))
+    with patch("custom_components.average.sensor.get_instance", return_value=recorder):
+        await sensor._async_update_state()
+    assert sensor.native_value == 35
+    assert sensor.available_sources == 2
+    assert sensor.available
+    assert recorder.async_add_executor_job.call_count == 2
+    await asyncio.sleep(0)
