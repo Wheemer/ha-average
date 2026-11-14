@@ -76,7 +76,7 @@ async def test_detached_query_failure_is_logged_and_allows_recovery(hass, caplog
     release = threading.Event()
     loop = asyncio.get_running_loop()
 
-    def fail(*args: object) -> None:
+    def fail(*args: object, **kwargs: object) -> None:
         loop.call_soon_threadsafe(started.set)
         assert release.wait(timeout=5)
         message = "late SQL failure"

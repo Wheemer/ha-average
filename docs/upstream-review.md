@@ -32,13 +32,13 @@ closed by us in July without upstream merge. Its fix is already in this fork.
 | [243](https://github.com/Limych/ha-average/issues/243) | Reproduced and fixed rounded-end caching of unavailable, partial and current-value-fallback results; these now retry at the configured interval instead of requiring a reload. Successful complete closed windows remain cached. Changed active YAML now reloads the affected loaded entry, including source edits with an explicit unique ID and non-identity option edits using a stable generated import ID. Unchanged YAML avoids needless entry reloads. Restored source counts no longer override the configured list, fixing strict-mode unavailability after a source-count edit. The native Quick Reload handler preserves identity and working source listeners with YAML active or commented out; other installation-specific causes remain unproven. No automatic deletion of imported entries. Import notices now direct users to verify identities/settings/history before commenting out YAML for UI management. |
 | [225](https://github.com/Limych/ha-average/issues/225) | Backlog: seasonal accumulated temperature is a separate aggregation, not the current arithmetic/time-weighted mean. |
 | [223](https://github.com/Limych/ha-average/issues/223) | Backlog: long-term statistics support; raw recorder retention limitation documented. No silent switch to hourly statistics. |
-| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Lazy recorder-state decoding now runs in the recorder executor, and cancelled refreshes cannot start replacement queries while their original SQL job is still running. Overall database/query cost remains a follow-up. |
+| [222](https://github.com/Limych/ha-average/issues/222) | Fixed reproduced event-driven refresh storm in strict history mode: source events obey update interval while publishing source loss immediately. Overlapping history refreshes are prevented. Large histories now also yield every 512 records so state and STOP callbacks can run; regression tests preserve numeric results. Lazy recorder-state decoding now runs in the recorder executor, and cancelled refreshes cannot start replacement queries while their original SQL job is still running. Ordinary numeric history also omits unused attributes and their SQL join; completed source lists are released before the next query loads. Database-specific query cost remains a follow-up. |
 | [217](https://github.com/Limych/ha-average/issues/217) | Not reproduced on current Core: real native configuration checks finish for instantaneous, duration and template-range YAML, without creating entries/states. Bounded regression tests cover the path. The upstream reporter noted that a Core/integration update resolved their old hang; no speculative workaround added. |
 | [185](https://github.com/Limych/ha-average/issues/185) | Unit-based temperature detection and metadata recovery covered, including sources with statistics-style metadata. |
 | [184](https://github.com/Limych/ha-average/issues/184) | Backlog: hourly sampling changes averaging semantics and needs a separate explicit mode. |
 | [183](https://github.com/Limych/ha-average/issues/183) | All calculation options are editable in Advanced, including legacy age/fallback and history-gap controls; native round-trip/explicit-clear checks preserve values and identity. |
 | [175](https://github.com/Limych/ha-average/issues/175) | Reproduced a startup TypeError when a source-dependent period template returned None. Missing boundaries now remain unavailable without startup errors; invalid/future/zero-length periods cannot fall back to an instantaneous value or reuse a stale previous period. Valid boundaries recover through normal updates. The broader unspecified startup report is not claimed fully resolved. |
-| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; lazy attribute/timestamp decoding now runs in the recorder executor. Cancellation retains the active query until its executor job completes, preventing overlapping replacement SQL work. Long-window database cost and the original ten-second warning remain separate validation work. |
+| [168](https://github.com/Limych/ha-average/issues/168) | Polling throttle covered. Reproduced event-loop starvation on 10,000 records and added cooperative processing with STOP checks; lazy attribute/timestamp decoding now runs in the recorder executor. Cancellation retains the active query until its executor job completes, preventing overlapping replacement SQL work. Unused numeric-history attributes and an unnecessary timestamp conversion are now omitted, and source-history lists are released before loading the next source. Database-specific long-window cost and the original ten-second warning remain separate validation work. |
 | [143](https://github.com/Limych/ha-average/issues/143) | Stacked temperature-unit metadata recovery covered. |
 | [123](https://github.com/Limych/ha-average/issues/123) | Intentional preservation: removing YAML does not delete imported entries or history. Remove unwanted entries explicitly from Integrations. Regression checks preserve entry and entity identity. |
 | [109](https://github.com/Limych/ha-average/issues/109) | Partial averages skip unavailable/unknown sources; restore/recovery and invalid-value checks covered. New undefined-history flags support explicit gap policy. Original screenshot not reproduced. |
@@ -179,3 +179,45 @@ update warning, not proof that its query was cancelled. These fixes reduce main
 loop work and prevent cancelled-query pileups; they do not prove every database
 or month-long history query will complete within ten seconds. Existing YAML
 `scan_interval` and UI **History update interval** settings remain unchanged.
+
+
+## Large-query payload and memory follow-up (#168 / #222)
+
+Ordinary non-temperature numeric histories fetched the full attribute payload and
+joined the attributes table even though their calculation only used numeric
+states and change times. They now use Core's supported `no_attributes` query
+option. Temperature histories retain their recorded units, and selected-attribute
+sources retain all their required attributes. Only the timestamp used by each
+calculation is materialized, rather than constructing both timestamps per point.
+
+A separate regression test reproduced retention of the previous source's entire
+history list while the next executor query loaded another large result. The
+processed result is now released before the next source query is submitted.
+This applies to both temperature and ordinary numeric histories.
+
+Two native SQLite regressions use 10,000 recorded points each. They verify the
+absence of the attributes join only for ordinary numeric sources, identical
+state/time sequences, unchanged source and sample counts, availability, units and
+extrema. The temperature case alternates recorded Celsius and Fahrenheit units
+and verifies the converted mean and extrema. The earlier numeric/attribute,
+strict-mode, weights, history-gap, import and UI tests remain passing.
+
+An isolated native Core 2026.11.1 benchmark used 100,000 rows with a 512-byte
+attribute payload. Timings below are the median of three query-and-decode runs;
+peak allocations were measured separately with Python `tracemalloc`, not process
+RSS. Both paths returned all 100,000 points. This measures local SQLite queries
+and decoding, not total integration update time or live-system performance.
+
+| Query/materialization path | Median seconds | Peak traced MiB |
+| --- | ---: | ---: |
+| Previous full metadata, both timestamps | 0.9436 | 140.78 |
+| Numeric history without unused metadata | 0.6201 | 79.64 |
+| Required metadata retained, only used timestamp | 0.8439 | 136.20 |
+
+The numeric case reduced measured query/decode time by about 34% and peak traced
+allocations by about 43% in this workload. Full-metadata histories still carry
+their required attributes; their workload is not represented by the numeric
+case's savings. No records are sampled, truncated or replaced by statistics.
+No configuration fields, default intervals or identities change: existing YAML
+and all UI controls retain their meanings. No live installation was accessed.
+A ten-second query guarantee or database-driver timeout is not implied.

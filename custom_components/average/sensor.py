@@ -113,13 +113,14 @@ YAML_IMPORT_ISSUE_ID = "yaml_imported"
 HISTORY_PROCESSING_BATCH_SIZE = 512
 
 
-def _materialized_history(
+def _materialized_history(  # noqa: PLR0913
     hass: HomeAssistant,
     start: datetime,
     end: datetime,
     entity_id: str,
     *,
     uses_attributes: bool,
+    needs_attributes: bool,
 ) -> dict[str, list[State]]:
     """Query and decode recorder's lazy states entirely in its executor."""
     if uses_attributes:
@@ -127,13 +128,17 @@ def _materialized_history(
             hass, start, end, [entity_id], significant_changes_only=False
         )
     else:
-        result = history.state_changes_during_period(hass, start, end, entity_id)
+        result = history.state_changes_during_period(
+            hass, start, end, entity_id, no_attributes=not needs_attributes
+        )
     for states in result.values():
         for state in states or ():
             if state is not None:
                 # LazyState defers JSON decoding and datetime construction until
                 # first access. Keep that work out of the averaging event loop.
-                _ = state.attributes, state.last_changed, state.last_updated
+                if needs_attributes:
+                    _ = state.attributes
+                _ = state.last_updated if uses_attributes else state.last_changed
     return result
 
 
@@ -867,7 +872,11 @@ class AverageSensor(RestoreSensor):
         self, start: datetime, end: datetime, entity_id: str, *, uses_attributes: bool
     ) -> dict[str, list[State]]:
         """Keep a cancelled refresh from queuing work over a still-running query."""
-        query = partial(_materialized_history, uses_attributes=uses_attributes)
+        query = partial(
+            _materialized_history,
+            uses_attributes=uses_attributes,
+            needs_attributes=uses_attributes or bool(self._temperature_mode),
+        )
         pending = ensure_future(
             get_instance(self.hass).async_add_executor_job(
                 query, self.hass, start, end, entity_id
@@ -1059,6 +1068,9 @@ class AverageSensor(RestoreSensor):
                     trending_last_state = last_state
 
                 _LOGGER.debug("Historical average state: %s", value)
+
+            # Do not retain this large result while the next source loads.
+            del history_list
 
             if isinstance(value, numbers.Number):
                 values.append((value, self._weights.get(entity_id, 1)))
