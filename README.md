@@ -38,9 +38,15 @@ Requires **Home Assistant 2024.12 or newer**. History averages also require Reco
 ### Switching from the original integration
 
 Already using `Limych/ha-average` with YAML? **Keep `platform: average`, your
-sensor names and unique IDs unchanged.** Uninstall the original repository's
-files through HACS/Marketplace, install this fork **before restarting**, then
-restart once. Do not delete sensors under Devices & services.
+sensor names and unique IDs unchanged.** The repository controls differ:
+
+- **HACS (before Home Assistant 2026.11):** open the original repository and select **Remove**. Add this fork through **Custom repositories** as an **Integration**, then **Download** it.
+- **Marketplace (Home Assistant 2026.11 onward):** open the original repository and select **Uninstall**. Add this fork through **Add from link**, then **Install** it.
+
+Complete the replacement **before restarting**, then restart once. These steps
+remove the old repository's downloaded files, not your YAML. Do not delete
+configured sensors under Devices & services. If removal says the integration
+is in use or offers **Delete and uninstall**, cancel and follow the upgrade guide.
 
 Follow the [step-by-step upgrade guide](docs/upgrading.md) before switching.
 It also explains what to do if Marketplace says the integration is in use.

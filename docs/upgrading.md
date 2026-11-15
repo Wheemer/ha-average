@@ -14,20 +14,39 @@ Average Sensor UI configuration entries. For that installation, the normal
 repository uninstall/install sequence releases the old repository's ownership
 without deleting sensor configuration.
 
-1. Make a Home Assistant backup and retain your existing Average Sensor YAML.
-2. Open the **Limych/ha-average** repository in HACS or **Settings > Marketplace**.
-3. Select its three-dot menu and **Uninstall**. This removes downloaded integration
-   files. **Do not restart yet.** Do not delete anything under Devices & services.
-   If you see **integration is in use** or **Delete and uninstall**, cancel and read
-   the next section; that is not the YAML-only case covered here.
-4. Add `https://github.com/Wheemer/ha-average` as a custom **Integration** repository
-   (HACS: **Custom repositories**; Marketplace: **Add from link**).
-5. Install this fork's latest stable release. Confirm **Wheemer/ha-average** is
-   shown as installed. Install it before accepting any pending restart reminder.
-6. Restart Home Assistant once, after the replacement files are present.
-7. Verify that your existing entities retain their IDs, settings, units and
-   recorder history. The fork imports your YAML definitions into UI entries; it
-   does not edit the YAML files.
+Back up Home Assistant first and retain your existing Average Sensor YAML.
+Use the instructions for your store below. **Finish installing the fork before
+restarting Home Assistant.**
+
+### HACS — before Home Assistant 2026.11
+
+1. Open **HACS**, then the original **Limych/ha-average** repository.
+2. Open the repository's three-dot menu and select **Remove**. This is the HACS
+   repository action, not deletion of a configured sensor under Devices & services.
+   **Do not restart yet.**
+3. Open HACS **Custom repositories**, add `https://github.com/Wheemer/ha-average`
+   with category **Integration**, then open that repository and select **Download**.
+4. Confirm the fork is downloaded, then restart Home Assistant once.
+
+### Marketplace — Home Assistant 2026.11 onward
+
+1. Open **Settings > Marketplace**, then the original **Limych/ha-average** repository.
+2. Open the repository's three-dot menu and select **Uninstall**. This removes the
+   downloaded files. **Do not restart yet.**
+3. Select **Add from link**, enter `https://github.com/Wheemer/ha-average`, and add
+   it as an **Integration** if prompted. Open the fork and select **Install**.
+4. Confirm **Wheemer/ha-average** is installed, then restart Home Assistant once.
+
+For either store, if removing the repository says **integration is in use**, asks
+you to remove configured sensors, or offers **Delete and uninstall**, cancel.
+Do not remove entries under Devices & services to continue. Read the restriction
+below instead of treating this as the YAML-only case.
+
+### Verify the upgrade
+
+Check that existing entities retain their IDs, settings, units and recorder
+history. The fork imports the existing YAML into UI entries; it does not edit
+YAML files. Do not change `platform: average`, sensor names or unique IDs.
 
 You can keep the YAML active and continue configuring those sensors there.
 To manage them in the UI instead, verify the import first, then comment out only
@@ -37,7 +56,7 @@ create replacement sensors with **Add integration** for definitions already impo
 No change from `platform: average` is needed. Once the fork is installed through
 the store, its future releases are offered through that repository's update entity.
 
-## Marketplace says the integration is in use
+## Removing the repository says the integration is in use
 
 Marketplace refuses repository uninstall when `average` already has UI
 configuration entries, including imported or disabled entries. This differs from
@@ -65,11 +84,14 @@ and filesystem lifecycle; GitHub metadata and release transport were supplied
 from cached fixtures. The three cases were an explicit unique ID, no unique ID,
 and the historical `__legacy__` setting. The checks cover unchanged YAML, existing
 entity IDs and registered unique IDs, no duplicate sensors, UI import and retained
-SQLite recorder rows across the restart. This does not claim an automatic
-repository transfer for installations that already have UI entries.
+SQLite recorder rows across the restart. This backend test did not exercise the browser interface or the older HACS
+frontend. The HACS menu labels follow its documented repository removal/download
+controls. It does not claim an automatic repository transfer for installations
+that already have UI entries.
 
 ## References
 
 - [Marketplace: uninstalling a repository](https://www.home-assistant.io/integrations/marketplace/#uninstalling-a-repository)
 - [Marketplace: custom repositories](https://www.home-assistant.io/integrations/marketplace/#custom-repositories)
-- [HACS: integrations](https://www.hacs.xyz/docs/use/repositories/type/integration/)
+- [HACS: removing and downloading repositories](https://www.hacs.xyz/docs/use/repositories/dashboard/)
+- [Maintainer explanation of Marketplace fork switching](https://github.com/hacs/integration/issues/5571#issuecomment-6223088416)
