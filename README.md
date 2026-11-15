@@ -35,6 +35,16 @@ and fixes maintained in [Wheemer/ha-average](https://github.com/Wheemer/ha-avera
 
 Requires **Home Assistant 2024.12 or newer**. History averages also require Recorder history for their sources.
 
+### Switching from the original integration
+
+Already using `Limych/ha-average` with YAML? **Keep `platform: average`, your
+sensor names and unique IDs unchanged.** Uninstall the original repository's
+files through HACS/Marketplace, install this fork **before restarting**, then
+restart once. Do not delete sensors under Devices & services.
+
+Follow the [step-by-step upgrade guide](docs/upgrading.md) before switching.
+It also explains what to do if Marketplace says the integration is in use.
+
 ### HACS
 
 [![Add this repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Wheemer&repository=ha-average&category=integration)
