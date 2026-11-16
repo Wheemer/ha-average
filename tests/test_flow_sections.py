@@ -214,6 +214,8 @@ class FlowSectionTests(unittest.TestCase):
             "entities": ["sensor.a"],
             "unique_id": "stable",
             "duration": {"minutes": 5},
+            "max_history_period": {"days": 90},
+            "history_query_timeout": {"minutes": 2},
             "scan_interval": {"seconds": 30},
             "precision": 3,
             "require_all_sources": True,
@@ -241,6 +243,8 @@ class FlowSectionTests(unittest.TestCase):
         ]
         for key in (
             "duration",
+            "max_history_period",
+            "history_query_timeout",
             "max_source_age",
             "process_undef_as",
             "ignore_undef",

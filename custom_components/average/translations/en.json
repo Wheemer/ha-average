@@ -28,7 +28,9 @@
               "process_undef_as": "Undefined value fallback",
               "ignore_undef": "Ignore undefined history intervals",
               "calculate_to_now_undef": "Extend last valid history reading",
-              "source_attributes": "Source attributes"
+              "source_attributes": "Source attributes",
+              "max_history_period": "Maximum history query window",
+              "history_query_timeout": "History query timeout"
             },
             "data_description": {
               "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
@@ -41,7 +43,9 @@
               "process_undef_as": "Optional numeric substitute for undefined readings. Clear to omit undefined values. Never overrides Require every source.",
               "ignore_undef": "Allow averaging valid history intervals when the latest recorded reading is undefined. Does not override strict source availability.",
               "calculate_to_now_undef": "Assume the last valid reading continues through undefined history intervals. Requires Ignore undefined history intervals.",
-              "source_attributes": "Optional mapping such as weather.home: humidity. Unmapped sources keep their default reading. Combine compatible quantities and units; missing attributes are invalid readings. Clear the mapping to use defaults. To measure a different quantity, create a new average to keep its history separate."
+              "source_attributes": "Optional mapping such as weather.home: humidity. Unmapped sources keep their default reading. Combine compatible quantities and units; missing attributes are invalid readings. Clear the mapping to use defaults. To measure a different quantity, create a new average to keep its history separate.",
+              "max_history_period": "Maximum recorder range per calculation. Defaults to 31 days when cleared. Longer ranges fail visibly without truncation. Increase deliberately for longer averages.",
+              "history_query_timeout": "Maximum time to wait for each recorder query. Defaults to 60 seconds when cleared. A timeout makes the sensor unavailable; the SQL job finishes in the background and no replacement query overlaps it."
             }
           }
         }
@@ -54,7 +58,11 @@
       "invalid_duration": "Durations must be greater than zero. Clear an optional duration to disable it.",
       "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled.",
       "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight.",
-      "invalid_source_attributes": "Map configured source IDs to nonempty attribute names."
+      "invalid_source_attributes": "Map configured source IDs to nonempty attribute names.",
+      "invalid_undefined_value": "Use a finite numeric undefined-value fallback; boolean, infinity and NaN values are not allowed."
+    },
+    "abort": {
+      "duplicate_unique_id": "This YAML unique ID belongs to conflicting sensor definitions. Give each sensor a distinct unique_id. The existing entry was not overwritten."
     }
   },
   "options": {
@@ -84,7 +92,9 @@
               "process_undef_as": "Undefined value fallback",
               "ignore_undef": "Ignore undefined history intervals",
               "calculate_to_now_undef": "Extend last valid history reading",
-              "source_attributes": "Source attributes"
+              "source_attributes": "Source attributes",
+              "max_history_period": "Maximum history query window",
+              "history_query_timeout": "History query timeout"
             },
             "data_description": {
               "start": "Optional template that renders the start of the history range as a datetime or timestamp. Use with end or average window.",
@@ -97,7 +107,9 @@
               "process_undef_as": "Optional numeric substitute for undefined readings. Clear to omit undefined values. Never overrides Require every source.",
               "ignore_undef": "Allow averaging valid history intervals when the latest recorded reading is undefined. Does not override strict source availability.",
               "calculate_to_now_undef": "Assume the last valid reading continues through undefined history intervals. Requires Ignore undefined history intervals.",
-              "source_attributes": "Optional mapping such as weather.home: humidity. Unmapped sources keep their default reading. Combine compatible quantities and units; missing attributes are invalid readings. Clear the mapping to use defaults. To measure a different quantity, create a new average to keep its history separate."
+              "source_attributes": "Optional mapping such as weather.home: humidity. Unmapped sources keep their default reading. Combine compatible quantities and units; missing attributes are invalid readings. Clear the mapping to use defaults. To measure a different quantity, create a new average to keep its history separate.",
+              "max_history_period": "Maximum recorder range per calculation. Defaults to 31 days when cleared. Longer ranges fail visibly without truncation. Increase deliberately for longer averages.",
+              "history_query_timeout": "Maximum time to wait for each recorder query. Defaults to 60 seconds when cleared. A timeout makes the sensor unavailable; the SQL job finishes in the background and no replacement query overlaps it."
             }
           }
         }
@@ -110,13 +122,18 @@
       "invalid_duration": "Durations must be greater than zero. Clear an optional duration to disable it.",
       "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled.",
       "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight.",
-      "invalid_source_attributes": "Map configured source IDs to nonempty attribute names."
+      "invalid_source_attributes": "Map configured source IDs to nonempty attribute names.",
+      "invalid_undefined_value": "Use a finite numeric undefined-value fallback; boolean, infinity and NaN values are not allowed."
     }
   },
   "issues": {
     "yaml_imported": {
       "title": "Verify your imported Average Sensor configuration",
       "description": "Average Sensor YAML configuration has been imported into UI config entries.\n\n1. Open **Settings > Devices & services > Integrations > Average Sensor**.\n2. Verify the existing entity IDs, unique IDs, settings, units, recorder history and statistics are intact.\n3. If you want to manage these sensors in the UI, comment out their **Average Sensor YAML definitions** after verification. Keep the commented definitions as a backup; do not delete or recreate the imported entries.\n\nActive YAML is imported again on startup or YAML reload and can overwrite UI edits. If you prefer to manage a sensor from YAML, leave its definition active and make changes there.\n\nThe integration does not edit your YAML files. You can dismiss this notice after completing these checks."
+    },
+    "duplicate_yaml_id": {
+      "title": "Resolve duplicate Average Sensor YAML IDs",
+      "description": "Multiple Average Sensor definitions conflict on unique_id `{unique_id}`. Their imports were refused to preserve the existing sensor. Give each YAML sensor a distinct unique_id, then reload Average Sensor. The historical __legacy__ marker may be used by multiple sensors."
     }
   }
 }

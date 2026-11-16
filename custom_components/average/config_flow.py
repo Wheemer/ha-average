@@ -36,7 +36,9 @@ from .const import (
     CONF_CALCULATE_TO_NOW_UNDEF,
     CONF_DURATION,
     CONF_END,
+    CONF_HISTORY_QUERY_TIMEOUT,
     CONF_IGNORE_UNDEF,
+    CONF_MAX_HISTORY_PERIOD,
     CONF_MAX_SOURCE_AGE,
     CONF_PRECISION,
     CONF_PROCESS_UNDEF_AS,
@@ -48,7 +50,9 @@ from .const import (
     DEFAULT_PRECISION,
     DOMAIN,
 )
+from .validation import finite_number
 from .weights import normalize_weights
+from .yaml_import import DATA_YAML_IDS, LEGACY_UNIQUE_ID, report_duplicate_id
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -76,6 +80,8 @@ SECTIONS = {
         CONF_MAX_SOURCE_AGE,
         CONF_PROCESS_UNDEF_AS,
         CONF_IGNORE_UNDEF,
+        CONF_MAX_HISTORY_PERIOD,
+        CONF_HISTORY_QUERY_TIMEOUT,
         CONF_CALCULATE_TO_NOW_UNDEF,
     ),
 }
@@ -121,7 +127,13 @@ def _validate_period(user_input: dict[str, Any]) -> dict[str, Any]:
     if not user_input.get(CONF_ENTITIES):
         error = "no_sources"
         raise SchemaFlowError(error)
-    for key in (CONF_DURATION, CONF_SCAN_INTERVAL, CONF_MAX_SOURCE_AGE):
+    for key in (
+        CONF_DURATION,
+        CONF_SCAN_INTERVAL,
+        CONF_MAX_SOURCE_AGE,
+        CONF_MAX_HISTORY_PERIOD,
+        CONF_HISTORY_QUERY_TIMEOUT,
+    ):
         if user_input.get(key) is not None:
             error = "invalid_duration"
             try:
@@ -131,23 +143,31 @@ def _validate_period(user_input: dict[str, Any]) -> dict[str, Any]:
             if seconds <= 0:
                 raise SchemaFlowError(error)
 
-    if CONF_WEIGHTS in user_input:
+    if CONF_PROCESS_UNDEF_AS in user_input:
         try:
-            user_input[CONF_WEIGHTS] = normalize_weights(
-                user_input[CONF_WEIGHTS], user_input[CONF_ENTITIES]
-            )
+            finite_number(user_input[CONF_PROCESS_UNDEF_AS])
         except (TypeError, ValueError) as err:
-            error = "invalid_weights"
+            error = "invalid_undefined_value"
             raise SchemaFlowError(error) from err
-    if CONF_SOURCE_ATTRIBUTES in user_input:
-        try:
-            user_input[CONF_SOURCE_ATTRIBUTES] = normalize_source_attributes(
-                user_input[CONF_SOURCE_ATTRIBUTES], user_input[CONF_ENTITIES]
-            )
-        except (TypeError, ValueError) as err:
-            error = "invalid_source_attributes"
-            raise SchemaFlowError(error) from err
+    _validate_source_mappings(user_input)
     return user_input
+
+
+def _validate_source_mappings(user_input: dict[str, Any]) -> None:
+    """Apply the shared YAML/UI validators to optional source mappings."""
+    for key, normalize, error in (
+        (CONF_WEIGHTS, normalize_weights, "invalid_weights"),
+        (
+            CONF_SOURCE_ATTRIBUTES,
+            normalize_source_attributes,
+            "invalid_source_attributes",
+        ),
+    ):
+        if key in user_input:
+            try:
+                user_input[key] = normalize(user_input[key], user_input[CONF_ENTITIES])
+            except (TypeError, ValueError) as err:
+                raise SchemaFlowError(error) from err
 
 
 def _duration_to_selector(value: Any) -> dict[str, int | float] | None:
@@ -196,7 +216,13 @@ def _yaml_config_to_options(config: dict[str, Any]) -> dict[str, Any]:
         if value := _template_to_string(config.get(key)):
             options[key] = value
 
-    for key in (CONF_DURATION, CONF_MAX_SOURCE_AGE, CONF_SCAN_INTERVAL):
+    for key in (
+        CONF_DURATION,
+        CONF_MAX_SOURCE_AGE,
+        CONF_SCAN_INTERVAL,
+        CONF_MAX_HISTORY_PERIOD,
+        CONF_HISTORY_QUERY_TIMEOUT,
+    ):
         if value := _duration_to_selector(config.get(key)):
             options[key] = value
 
@@ -212,7 +238,7 @@ def _yaml_config_to_options(config: dict[str, Any]) -> dict[str, Any]:
 
 def _import_unique_id(options: dict[str, Any]) -> str:
     """Return a stable unique ID for an imported YAML average sensor."""
-    if unique_id := options.get(CONF_UNIQUE_ID):
+    if (unique_id := options.get(CONF_UNIQUE_ID)) and unique_id != LEGACY_UNIQUE_ID:
         return f"yaml_{unique_id}"
 
     source = "|".join(
@@ -262,6 +288,12 @@ async def validate_options(
 ADVANCED_SCHEMA = schema_lib.Schema(
     {
         schema_lib.Optional(CONF_DURATION): selector.DurationSelector(
+            selector.DurationSelectorConfig(allow_negative=False)
+        ),
+        schema_lib.Optional(CONF_MAX_HISTORY_PERIOD): selector.DurationSelector(
+            selector.DurationSelectorConfig(allow_negative=False)
+        ),
+        schema_lib.Optional(CONF_HISTORY_QUERY_TIMEOUT): selector.DurationSelector(
             selector.DurationSelectorConfig(allow_negative=False)
         ),
         schema_lib.Optional(CONF_START): selector.TemplateSelector(),
@@ -356,10 +388,22 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
         options = _yaml_config_to_options(import_config)
         _validate_period(options)
 
-        if unique_id := options.get(CONF_UNIQUE_ID):
+        if (unique_id := options.get(CONF_UNIQUE_ID)) and unique_id != LEGACY_UNIQUE_ID:
+            yaml_names = self.hass.data.get(DATA_YAML_IDS, {}).get(unique_id, [])
+            if len(yaml_names) > 1 or (
+                yaml_names and yaml_names[0] != options[CONF_NAME]
+            ):
+                report_duplicate_id(self.hass, unique_id)
+                return self.async_abort(reason="duplicate_unique_id")
             for entry in self._async_current_entries():
                 entry_options = _entry_options(entry)
                 if entry_options.get(CONF_UNIQUE_ID) == unique_id:
+                    if (
+                        not yaml_names
+                        and entry_options.get(CONF_NAME) != options[CONF_NAME]
+                    ):
+                        report_duplicate_id(self.hass, unique_id)
+                        return self.async_abort(reason="duplicate_unique_id")
                     self._async_update_imported_entry(entry, options)
                     return self.async_abort(reason="already_configured")
 
@@ -375,9 +419,29 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
             identities.append(_import_unique_id(interim))
         for identity in identities:
             for entry in self._async_current_entries():
-                if entry.unique_id == identity:
+                entry_options = _entry_options(entry)
+                legacy_match = (
+                    options.get(CONF_UNIQUE_ID) == LEGACY_UNIQUE_ID
+                    and entry_options.get(CONF_UNIQUE_ID) == LEGACY_UNIQUE_ID
+                    and _import_unique_id(entry_options) == identity
+                )
+                if entry.unique_id == identity or legacy_match:
                     self._async_update_imported_entry(entry, options)
                     return self.async_abort(reason="already_configured")
+
+        # The legacy marker is per-sensor, not an explicit global ID. A single
+        # named YAML definition can update its own entry after source edits.
+        if options.get(CONF_UNIQUE_ID) == LEGACY_UNIQUE_ID:
+            names = self.hass.data.get(DATA_YAML_IDS, {}).get(LEGACY_UNIQUE_ID, [])
+            matches = [
+                entry
+                for entry in self._async_current_entries()
+                if _entry_options(entry).get(CONF_UNIQUE_ID) == LEGACY_UNIQUE_ID
+                and _entry_options(entry).get(CONF_NAME) == options[CONF_NAME]
+            ]
+            if names.count(options[CONF_NAME]) == 1 and len(matches) == 1:
+                self._async_update_imported_entry(matches[0], options)
+                return self.async_abort(reason="already_configured")
 
         return self.async_create_entry(data=options)
 
@@ -387,11 +451,12 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
     ) -> None:
         """Apply changed YAML to a loaded entry, without duplicate or no-op reloads."""
         current = _entry_options(entry)
-        merged = {**current, **options}
+        # Active YAML is the source of truth, including removed optional keys.
+        merged = dict(options)
         if merged == current:
             return
         self.hass.config_entries.async_update_entry(
-            entry, options=merged, title=self.async_config_entry_title(merged)
+            entry, data={}, options=merged, title=self.async_config_entry_title(merged)
         )
         if entry.state is ConfigEntryState.LOADED and hasattr(
             SchemaConfigFlowHandler, "options_flow_reloads"

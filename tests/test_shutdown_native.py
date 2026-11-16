@@ -54,9 +54,10 @@ class ShutdownTests(unittest.IsolatedAsyncioTestCase):
 
         class RemoveStopGuards(ast.NodeTransformer):
             def visit_If(self, node):
-                if "_stopping" in ast.unparse(
-                    node.test
-                ) or "is_stopping" in ast.unparse(node.test):
+                if any(
+                    guard in ast.unparse(node.test)
+                    for guard in ("_stopping", "is_stopping", "_updates_blocked")
+                ):
                     return None
                 return self.generic_visit(node)
 

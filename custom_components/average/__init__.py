@@ -15,7 +15,9 @@ import logging
 from typing import TYPE_CHECKING
 
 import voluptuous as vol
+from homeassistant.config import async_hass_config_yaml
 from homeassistant.const import SERVICE_RELOAD
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.reload import async_reload_integration_platforms
 from homeassistant.helpers.schema_config_entry_flow import SchemaConfigFlowHandler
 
@@ -25,17 +27,25 @@ if TYPE_CHECKING:
     from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, PLATFORMS, STARTUP_MESSAGE
+from .yaml_import import prepare_yaml_import
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:  # noqa: ARG001
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the platforms."""
+    prepare_yaml_import(hass, config)
     # Print startup message
     _LOGGER.info(STARTUP_MESSAGE)
 
     async def reload_service_handler(service: ServiceCall) -> None:  # noqa: ARG001
         """Reload all average sensors from config."""
+        try:
+            config = await async_hass_config_yaml(hass)
+        except HomeAssistantError:
+            _LOGGER.exception("Could not reload Average Sensor YAML")
+            return
+        prepare_yaml_import(hass, config)
         await async_reload_integration_platforms(hass, DOMAIN, PLATFORMS)
 
     hass.services.async_register(

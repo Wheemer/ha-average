@@ -80,3 +80,9 @@ CONF_CALCULATE_TO_NOW_UNDEF: Final = "calculate_to_now_undef"
 CONF_WEIGHTS: Final = "weights"
 
 CONF_SOURCE_ATTRIBUTES: Final = "source_attributes"
+
+# Recorder safety limits, configurable through YAML and the options flow.
+CONF_MAX_HISTORY_PERIOD: Final = "max_history_period"
+CONF_HISTORY_QUERY_TIMEOUT: Final = "history_query_timeout"
+DEFAULT_MAX_HISTORY_PERIOD: Final = timedelta(days=31)
+DEFAULT_HISTORY_QUERY_TIMEOUT: Final = timedelta(seconds=60)

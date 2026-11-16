@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import yaml
 from homeassistant.helpers import entity_registry as er
@@ -130,3 +130,103 @@ async def test_ui_source_count_edit_remains_available_in_strict_mode(hass):
     assert state.attributes["count_sources"] == 1
     assert state.attributes["available_sources"] == 1
     assert er.async_get(hass).async_get(entity_id).unique_id == unique_id
+
+
+async def test_yaml_removing_optional_settings_clears_saved_options(hass, tmp_path):
+    """YAML removals apply without recreating a sensor or changing its ID."""
+    hass.config.config_dir = str(tmp_path)
+    (tmp_path / "custom_components").symlink_to(
+        Path(__file__).parents[1] / "custom_components", target_is_directory=True
+    )
+    config = config_for("sensor.a")
+    options = {
+        "duration": {"minutes": 5},
+        "weights": {"sensor.a": 2},
+        "process_undef_as": 0,
+        "max_source_age": {"minutes": 10},
+        "source_attributes": {"sensor.a": "level"},
+    }
+    config["sensor"][0].update(options)
+    path = tmp_path / "configuration.yaml"
+    path.write_text(yaml.safe_dump(config))
+    hass.states.async_set("sensor.a", "20", {"level": 10})
+    recorder = Mock(async_add_executor_job=AsyncMock(return_value={}))
+    with patch("custom_components.average.sensor.get_instance", return_value=recorder):
+        assert await async_setup_component(hass, "sensor", config)
+        await hass.async_block_till_done()
+        await hass.async_start()
+        await hass.async_block_till_done()
+        entry = hass.config_entries.async_entries("average")[0]
+        entity_id = "sensor.reload_average"
+        identity = er.async_get(hass).async_get(entity_id).unique_id
+        path.write_text(yaml.safe_dump(config_for("sensor.a")))
+        await hass.services.async_call("average", "reload", {}, blocking=True)
+        await hass.async_block_till_done()
+    for key in options:
+        assert key not in entry.options
+    assert hass.states.get(entity_id).state == "20.0"
+    assert er.async_get(hass).async_get(entity_id).unique_id == identity
+    assert hass.config_entries.async_entries("average") == [entry]
+
+
+async def test_yaml_rename_with_stable_id_retains_entry_and_entity(hass, tmp_path):
+    """A legitimate YAML rename must not be confused with a duplicate ID."""
+    hass.config.config_dir = str(tmp_path)
+    (tmp_path / "custom_components").symlink_to(
+        Path(__file__).parents[1] / "custom_components", target_is_directory=True
+    )
+    config = config_for("sensor.a")
+    path = tmp_path / "configuration.yaml"
+    path.write_text(yaml.safe_dump(config))
+    hass.states.async_set("sensor.a", "20")
+    assert await async_setup_component(hass, "sensor", config)
+    await hass.async_block_till_done()
+    await hass.async_start()
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries("average")[0]
+    entity_id = "sensor.reload_average"
+    identity = er.async_get(hass).async_get(entity_id).unique_id
+    config["sensor"][0]["name"] = "Renamed Average"
+    path.write_text(yaml.safe_dump(config))
+    await hass.services.async_call("average", "reload", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_entries("average") == [entry]
+    assert entry.title == "Renamed Average"
+    assert er.async_get(hass).async_get(entity_id).unique_id == identity
+    assert hass.states.get(entity_id).state == "20.0"
+
+
+async def test_legacy_sensor_source_edits_preserve_historical_entity_id(hass, tmp_path):
+    """Both YAML reload and UI edits keep the original legacy entity hash."""
+    hass.config.config_dir = str(tmp_path)
+    (tmp_path / "custom_components").symlink_to(
+        Path(__file__).parents[1] / "custom_components", target_is_directory=True
+    )
+    config = config_for("sensor.a")
+    config["sensor"][0]["unique_id"] = "__legacy__"
+    path = tmp_path / "configuration.yaml"
+    path.write_text(yaml.safe_dump(config))
+    hass.states.async_set("sensor.a", "20")
+    hass.states.async_set("sensor.b", "40")
+    assert await async_setup_component(hass, "sensor", config)
+    await hass.async_block_till_done()
+    await hass.async_start()
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries("average")[0]
+    entity_id = "sensor.reload_average"
+    identity = er.async_get(hass).async_get(entity_id).unique_id
+    config["sensor"][0]["entities"] = ["sensor.b"]
+    path.write_text(yaml.safe_dump(config))
+    await hass.services.async_call("average", "reload", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_entries("average") == [entry]
+    assert hass.states.get(entity_id).state == "40.0"
+    assert er.async_get(hass).async_get(entity_id).unique_id == identity
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"], user_input={"entities": ["sensor.a"]}
+    )
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "20.0"
+    assert er.async_get(hass).async_get(entity_id).unique_id == identity
