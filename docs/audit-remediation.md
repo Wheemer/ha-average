@@ -28,3 +28,28 @@ Recorder databases on the development server. No live Home Assistant is accessed
 Native lifecycle/UI-schema harnesses also run on the advertised minimum Core
 2026.4.0. A green suite is not proof of live installation behavior or SQL
 cancellation, and this patch does not claim that timed-out database work stops.
+
+
+## Follow-up batch
+
+- **M5:** no-ID edits matching an existing imported name/configuration produce an
+  actionable Repairs notice instead of silently creating another sensor. For a
+  single matching definition, the edit is refused until its existing registry ID
+  is added; explicit adoption reuses the entry and entity. Intentionally multiple
+  same-name YAML definitions remain supported with a warning. Completely changed
+  names and sources cannot be reliably inferred as edits; keep explicit IDs.
+- **M7/M8:** manifest version/tracker are authoritative; deterministic offline
+  metadata synchronization updates generated constants and genuine runtime
+  dependencies, preserving the independent HACS minimum. The pre-commit gate is
+  non-mutating. The release helper prepares metadata only, without commits/tags.
+- **M10/M11:** replace stale HACS information and contribution instructions with
+  fork links, supported migration and the actual inherited CC BY-NC-SA license.
+- **M12/L25/L28:** repair the Bandit profile, run Bandit in CI, align pre-commit
+  Ruff with CI and remove the unused conflicting pyproject Ruff configuration.
+- **L19/L21:** invalid imports now abort with a translated reason rather than an
+  unhandled validation exception; UI creation rejects empty/whitespace names.
+- **L23/L24/L31/L32:** remove pip from runtime requirements, identify the current
+  fork maintainer, fix issue links/nonexistent diagnostics and test documentation.
+
+Other low/informational findings remain pending verification. No live system was
+accessed and no release was published for this follow-up.

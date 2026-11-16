@@ -53,7 +53,13 @@ them. Clear an optional field to disable that setting.
 ## YAML Examples
 
 YAML remains supported as an import path. Definitions are added under `sensor:`.
-Keep a stable, explicit `unique_id` for an existing sensor.
+Keep a stable, explicit `unique_id` for an existing sensor. If an older definition
+has no explicit ID, changing its name, sources or period can change its import
+fingerprint. When that edit matches an existing sensor, Repairs provides the
+existing unique ID to add to YAML. Reloading with that ID adopts the same entry
+and preserves its entity ID and history. To create a separate sensor instead,
+choose a new, distinct unique ID. You can also verify the imported entry, comment
+out YAML and edit it in the UI.
 
 ### Current room temperature
 

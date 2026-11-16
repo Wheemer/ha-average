@@ -1,0 +1,2 @@
+# Average Sensor uses Home Assistant and the Python standard library only.
+# Add genuine integration runtime dependencies here, never development tools.

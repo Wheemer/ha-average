@@ -1,65 +1,47 @@
-# Contribution guidelines
+# Contributing
 
-Contributing to this project should be as easy and transparent as possible, whether it's:
+Report bugs through [this fork's issue tracker](https://github.com/Wheemer/ha-average/issues/new/choose).
+Include the integration and Home Assistant versions, reproduction steps and
+relevant configuration or logs with private details removed. Report suspected
+security vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
-- Reporting a bug
-- Discussing the current state of the code
-- Submitting a fix
-- Proposing new features
+## Development
 
-## IMPORTANT! Install development environment first
+Branch from `dev`. Use a Python 3.14 virtual environment and install
+`python -m pip install -r requirements-dev.txt`. Install hooks with
+`pre-commit install`.
 
-When making changes in code, please use the existing development environment — this will save you from many errors and help create more convenient code to support. To install the environment, run the `./scripts/setup` script.
+Before submitting a pull request, run:
 
-## Github is used for everything
+```sh
+python scripts/metadata.py --check
+python -m ruff check .
+python -m ruff format . --check
+python -m bandit -r custom_components -c tests/bandit.yaml
+python -m pytest -n 2 --dist=loadfile -q
+```
 
-Github is used to host code, to track issues and feature requests, as well as accept pull requests.
+The native minimum-version checks run with `python scripts/check_minimum.py`
+and require Docker. Tests use temporary instances and synthetic data; do not
+connect them to a live Home Assistant installation. Preserve YAML compatibility,
+UI configuration, entity IDs and unique IDs when fixing existing behavior.
 
-Pull requests are the best way to propose changes to the codebase.
+## Metadata and releases
 
-1. Fork the repo and create your branch from `main`.
-2. If you've changed something, update the documentation.
-3. Make sure your code lints (using black).
-4. Test you contribution.
-5. Issue that pull request!
+`custom_components/average/manifest.json` is authoritative for the integration
+version and issue tracker. `requirements-runtime.txt` lists genuine runtime
+dependencies; developer/test packages do not belong in the integration manifest.
+Run `scripts/update_manifest` after changing either file. The hook validates
+metadata without changing the Home Assistant minimum in `hacs.json`.
 
-## Any contributions you make will be under the MIT Software License
-
-In short, when you submit code changes, your submissions are understood to be under the same [MIT License](http://choosealicense.com/licenses/mit/) that covers the project. Feel free to contact the maintainers if that's a concern.
-
-## Report bugs using Github's [issues](../../issues)
-
-GitHub issues are used to track public bugs.
-Report a bug by [opening a new issue](../../issues/new/choose); it's that easy!
-
-## Write bug reports with detail, background, and sample code
-
-**Great Bug Reports** tend to have:
-
-- A quick summary and/or background
-- Steps to reproduce
-  - Be specific!
-  - Give sample code if you can.
-- What you expected would happen
-- What actually happens
-- Notes (possibly including why you think this might be happening, or stuff you tried that didn't work)
-
-People *love* thorough bug reports. I'm not even kidding.
-
-## Use a Consistent Coding Style
-
-Use [black](https://github.com/ambv/black) to make sure the code follows the style.
-
-## Test your code modification
-
-This custom component is based on [integration blueprint template](https://github.com/Limych/ha-blueprint).
-
-It comes with development environment in a container, easy to launch
-if you use Visual Studio Code. With this container you will have a stand alone
-Home Assistant instance running and already configured with the included
-[`configuration.yaml`](./config/configuration.yaml)
-file.
+`scripts/release VERSION` prepares version metadata for review only. Submit and
+merge the change through a pull request after checks pass. Publishing requires a
+separately authorized `vVERSION` tag; the release workflow builds `average.zip`
+and its checksum. Release notes should describe changes and credit contributors.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under its MIT License.
+This project and contributions are covered by the existing
+[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International license](LICENSE.md).
+Keep original attribution and license notices. This fork does not claim an MIT
+license or permission to relicense the inherited work.
