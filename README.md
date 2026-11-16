@@ -33,7 +33,7 @@ and fixes maintained in [Wheemer/ha-average](https://github.com/Wheemer/ha-avera
 
 ## Install
 
-Requires **Home Assistant 2025.1 or newer**. History averages also require Recorder history for their sources.
+Requires **Home Assistant 2025.4 or newer**. History averages also require Recorder history for their sources.
 
 ### Switching from the original integration
 
