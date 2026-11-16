@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from hashlib import sha1
 from importlib import import_module
@@ -13,7 +14,7 @@ from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.components.water_heater import DOMAIN as WATER_HEATER_DOMAIN
 from homeassistant.components.weather import DOMAIN as WEATHER_DOMAIN
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntryState
 from homeassistant.const import (
     CONF_ENTITIES,
     CONF_NAME,
@@ -23,6 +24,7 @@ from homeassistant.const import (
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 from homeassistant.helpers.schema_config_entry_flow import (
     SchemaCommonFlowHandler,
@@ -52,7 +54,14 @@ from .const import (
 )
 from .validation import finite_number
 from .weights import normalize_weights
-from .yaml_import import DATA_YAML_IDS, LEGACY_UNIQUE_ID, report_duplicate_id
+from .yaml_import import (
+    DATA_YAML_IDS,
+    DATA_YAML_NAMES,
+    LEGACY_UNIQUE_ID,
+    clear_identity_change,
+    report_duplicate_id,
+    report_identity_change,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -64,6 +73,8 @@ if TYPE_CHECKING:
 schema_lib = import_module(
     get_type_hints(section.__init__)["schema"].__module__.split(".", 1)[0]
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 ERR_PERIOD_START_OR_END_WITHOUT_DURATION = "period_start_or_end_without_duration"
 ERR_TOO_MANY_PERIOD_OPTIONS = "too_many_period_options"
@@ -109,6 +120,9 @@ SOURCE_DOMAINS = [
 
 def _validate_period(user_input: dict[str, Any]) -> dict[str, Any]:
     """Validate period fields."""
+    if CONF_NAME in user_input and not user_input[CONF_NAME].strip():
+        error = "invalid_name"
+        raise SchemaFlowError(error)
     has_start = bool(user_input.get(CONF_START))
     has_end = bool(user_input.get(CONF_END))
     has_duration = user_input.get(CONF_DURATION) is not None
@@ -386,26 +400,18 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Import YAML configuration."""
         options = _yaml_config_to_options(import_config)
-        _validate_period(options)
+        try:
+            _validate_period(options)
+        except SchemaFlowError as err:
+            _LOGGER.warning(
+                'Invalid Average Sensor YAML for "%s": %s', options[CONF_NAME], err
+            )
+            return self.async_abort(reason="invalid_config")
 
         if (unique_id := options.get(CONF_UNIQUE_ID)) and unique_id != LEGACY_UNIQUE_ID:
-            yaml_names = self.hass.data.get(DATA_YAML_IDS, {}).get(unique_id, [])
-            if len(yaml_names) > 1 or (
-                yaml_names and yaml_names[0] != options[CONF_NAME]
-            ):
-                report_duplicate_id(self.hass, unique_id)
-                return self.async_abort(reason="duplicate_unique_id")
-            for entry in self._async_current_entries():
-                entry_options = _entry_options(entry)
-                if entry_options.get(CONF_UNIQUE_ID) == unique_id:
-                    if (
-                        not yaml_names
-                        and entry_options.get(CONF_NAME) != options[CONF_NAME]
-                    ):
-                        report_duplicate_id(self.hass, unique_id)
-                        return self.async_abort(reason="duplicate_unique_id")
-                    self._async_update_imported_entry(entry, options)
-                    return self.async_abort(reason="already_configured")
+            result = self._async_import_explicit_id(options)
+            if result is not None:
+                return result
 
         await self.async_set_unique_id(_import_unique_id(options))
         identities = [self.unique_id]
@@ -443,7 +449,98 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
                 self._async_update_imported_entry(matches[0], options)
                 return self.async_abort(reason="already_configured")
 
+        if self._async_identity_change_requires_id(options):
+            return self.async_abort(reason="yaml_identity_changed")
+
         return self.async_create_entry(data=options)
+
+    @callback
+    def _async_import_explicit_id(
+        self, options: dict[str, Any]
+    ) -> ConfigFlowResult | None:
+        """Update a verified explicit identity or refuse conflicting definitions."""
+        unique_id = options[CONF_UNIQUE_ID]
+        yaml_names = self.hass.data.get(DATA_YAML_IDS, {}).get(unique_id, [])
+        if len(yaml_names) > 1 or (yaml_names and yaml_names[0] != options[CONF_NAME]):
+            report_duplicate_id(self.hass, unique_id)
+            return self.async_abort(reason="duplicate_unique_id")
+        for entry in self._async_current_entries():
+            entry_options = _entry_options(entry)
+            if entry_options.get(CONF_UNIQUE_ID) == unique_id:
+                if (
+                    not yaml_names
+                    and entry_options.get(CONF_NAME) != options[CONF_NAME]
+                ):
+                    report_duplicate_id(self.hass, unique_id)
+                    return self.async_abort(reason="duplicate_unique_id")
+                self._async_update_imported_entry(entry, options)
+                return self.async_abort(reason="already_configured")
+
+        if entry := self._async_entry_for_entity_id(unique_id):
+            self._async_update_imported_entry(entry, options)
+            return self.async_abort(reason="already_configured")
+
+        return None
+
+    @callback
+    def _async_entry_for_entity_id(self, unique_id: str) -> ConfigEntry | None:
+        """Adopt a no-ID entry using the existing registry identity explicitly."""
+        registry = er.async_get(self.hass)
+        entity_id = registry.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, unique_id)
+        if entity_id is None:
+            return None
+        owner = registry.async_get(entity_id).config_entry_id
+        return next(
+            (
+                entry
+                for entry in self._async_current_entries()
+                if entry.entry_id == owner
+                and not _entry_options(entry).get(CONF_UNIQUE_ID)
+            ),
+            None,
+        )
+
+    @callback
+    def _async_identity_change_requires_id(self, options: dict[str, Any]) -> bool:
+        """Refuse ambiguous no-ID edits instead of spawning hidden duplicates."""
+        if options.get(CONF_UNIQUE_ID):
+            return False
+        candidates = [
+            entry
+            for entry in self._async_current_entries()
+            if entry.source == SOURCE_IMPORT
+            and not _entry_options(entry).get(CONF_UNIQUE_ID)
+            and (
+                _entry_options(entry).get(CONF_NAME) == options[CONF_NAME]
+                or _import_unique_id({**_entry_options(entry), CONF_NAME: ""})
+                == _import_unique_id({**options, CONF_NAME: ""})
+            )
+        ]
+        if candidates:
+            registry = er.async_get(self.hass)
+            choices = []
+            for entry in candidates:
+                entities = [
+                    entity
+                    for entity in er.async_entries_for_config_entry(
+                        registry, entry.entry_id
+                    )
+                    if entity.platform == DOMAIN and entity.domain == SENSOR_DOMAIN
+                ]
+                if entities:
+                    choices.extend(
+                        f'- `{entity.entity_id}`: `unique_id: "{entity.unique_id}"`'
+                        for entity in entities
+                    )
+                else:
+                    choices.append(f'- {entry.title}: `unique_id: "{entry.entry_id}"`')
+            report_identity_change(self.hass, options[CONF_NAME], "\n".join(choices))
+            # Preserve valid multiple-same-name YAML definitions. For a
+            # single definition an ambiguous edit must not spawn a duplicate.
+            if self.hass.data.get(DATA_YAML_NAMES, {}).get(options[CONF_NAME], 0) <= 1:
+                return True
+
+        return False
 
     @callback
     def _async_update_imported_entry(
@@ -451,6 +548,9 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
     ) -> None:
         """Apply changed YAML to a loaded entry, without duplicate or no-op reloads."""
         current = _entry_options(entry)
+        if options.get(CONF_UNIQUE_ID):
+            clear_identity_change(self.hass, current[CONF_NAME])
+            clear_identity_change(self.hass, options[CONF_NAME])
         # Active YAML is the source of truth, including removed optional keys.
         merged = dict(options)
         if merged == current:

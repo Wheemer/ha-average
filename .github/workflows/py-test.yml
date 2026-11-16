@@ -39,6 +39,10 @@ jobs:
         # This is an explicit forward-compatibility test. The other matrix job
         # retains pytest-homeassistant's exact dependency pins.
         run: python -m pip install --no-deps -r requirements-test-latest.txt
+      - name: Metadata consistency
+        run: python scripts/metadata.py --check
+      - name: Bandit security scan
+        run: python -m bandit -r custom_components -c tests/bandit.yaml --quiet
       - name: Ruff lint
         run: python -m ruff check .
       - name: Ruff format

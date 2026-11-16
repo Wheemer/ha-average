@@ -1,13 +1,19 @@
 """Regression coverage for destructive YAML import collisions."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.schema_config_entry_flow import SchemaFlowError
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant.common import MockConfigEntry
 
-from custom_components.average.config_flow import _yaml_config_to_options
+from custom_components.average.config_flow import (
+    _yaml_config_to_options,
+    validate_options,
+)
 from custom_components.average.sensor import PLATFORM_SCHEMA, AverageSensor
 from custom_components.average.yaml_import import (
     prepare_yaml_import,
@@ -152,3 +158,40 @@ async def test_conflict_notice_clears_after_correcting_yaml(hass):
         issue.translation_key == "duplicate_yaml_id"
         for issue in ir.async_get(hass).issues.values()
     )
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"duration": {"seconds": 0}},
+        {"scan_interval": {"seconds": 0}},
+        {"max_source_age": {"seconds": 0}},
+        {"entities": []},
+        {"name": "   "},
+    ],
+)
+async def test_invalid_yaml_import_aborts_cleanly_without_replacing_entries(
+    hass, settings
+):
+    """Import validation failures must not escape as unhandled flow errors."""
+    config = {
+        "platform": "average",
+        "name": "Invalid",
+        "entities": ["sensor.a"],
+        **settings,
+    }
+    result = await hass.config_entries.flow.async_init(
+        "average", context={"source": "import"}, data=config
+    )
+    assert result["type"] == "abort"
+    assert result["reason"] == "invalid_config"
+    assert not hass.config_entries.async_entries("average")
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+async def test_blank_ui_sensor_names_are_rejected(name):
+    """The UI must reject blank titles with a translated validation message."""
+    with pytest.raises(SchemaFlowError):
+        await validate_options(
+            SimpleNamespace(options={}), {"name": name, "entities": ["sensor.a"]}
+        )

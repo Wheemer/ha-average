@@ -4,8 +4,10 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
 import yaml
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 
 
@@ -229,4 +231,52 @@ async def test_legacy_sensor_source_edits_preserve_historical_entity_id(hass, tm
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == "20.0"
+    assert er.async_get(hass).async_get(entity_id).unique_id == identity
+
+
+@pytest.mark.parametrize("edit", ["source", "name"])
+async def test_no_id_yaml_edit_requires_explicit_adoption_and_preserves_sensor(
+    hass, tmp_path, edit
+):
+    """A changed fingerprint cannot silently duplicate or replace a sensor."""
+    hass.config.config_dir = str(tmp_path)
+    (tmp_path / "custom_components").symlink_to(
+        Path(__file__).parents[1] / "custom_components", target_is_directory=True
+    )
+    config = config_for("sensor.a")
+    config["sensor"][0].pop("unique_id")
+    path = tmp_path / "configuration.yaml"
+    path.write_text(yaml.safe_dump(config))
+    hass.states.async_set("sensor.a", "20")
+    hass.states.async_set("sensor.b", "40")
+    assert await async_setup_component(hass, "sensor", config)
+    await hass.async_block_till_done()
+    await hass.async_start()
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries("average")[0]
+    entity_id = "sensor.reload_average"
+    identity = er.async_get(hass).async_get(entity_id).unique_id
+    if edit == "source":
+        config["sensor"][0]["entities"] = ["sensor.b"]
+    else:
+        config["sensor"][0]["name"] = "Renamed YAML"
+    path.write_text(yaml.safe_dump(config))
+    await hass.services.async_call("average", "reload", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_entries("average") == [entry]
+    assert entry.options["entities"] == ["sensor.a"]
+    assert hass.states.get(entity_id).state == "20.0"
+    notices = [
+        issue
+        for issue in ir.async_get(hass).issues.values()
+        if issue.translation_key == "yaml_identity_changed"
+    ]
+    assert len(notices) == 1
+    assert identity in notices[0].translation_placeholders["candidates"]
+    config["sensor"][0]["unique_id"] = identity
+    path.write_text(yaml.safe_dump(config))
+    await hass.services.async_call("average", "reload", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_entries("average") == [entry]
+    assert hass.states.get(entity_id).state == ("40.0" if edit == "source" else "20.0")
     assert er.async_get(hass).async_get(entity_id).unique_id == identity

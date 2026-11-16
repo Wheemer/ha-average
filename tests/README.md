@@ -14,12 +14,12 @@ To begin, it is recommended to create a virtual environment and install all nece
 Command | Description
 ------- | -----------
 `pytest` | This will run all tests and tell you how many passed/failed. It also show you a [code coverage](https://en.wikipedia.org/wiki/Code_coverage) summary of component, including % of code that was executed and the line numbers of missed executions.
-`pytest tests/test_init.py -k test_setup_unload_and_reload_entry` | Runs the `test_setup_unload_and_reload_entry` test function located in `tests/test_init.py`
+`pytest tests/test__init.py -k test_config_entry_reload_preserves_available_sensor` | Runs the `test_config_entry_reload_preserves_available_sensor` test function located in `tests/test__init.py`
 
 
 ## Current native checks
 
-The test dependencies use Core-maintained `pytest-homeassistant==2026.11.0`
+The test dependencies use Core-maintained `pytest-homeassistant==2026.11.1`
 (Python 3.14). Run `python -m pytest` for the full suite. The standalone lifecycle
 harnesses also run in an unmodified Home Assistant Core 2026.11.1 image:
 

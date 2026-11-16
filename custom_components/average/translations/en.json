@@ -59,10 +59,13 @@
       "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled.",
       "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight.",
       "invalid_source_attributes": "Map configured source IDs to nonempty attribute names.",
-      "invalid_undefined_value": "Use a finite numeric undefined-value fallback; boolean, infinity and NaN values are not allowed."
+      "invalid_undefined_value": "Use a finite numeric undefined-value fallback; boolean, infinity and NaN values are not allowed.",
+      "invalid_name": "Enter a nonempty sensor name."
     },
     "abort": {
-      "duplicate_unique_id": "This YAML unique ID belongs to conflicting sensor definitions. Give each sensor a distinct unique_id. The existing entry was not overwritten."
+      "duplicate_unique_id": "This YAML unique ID belongs to conflicting sensor definitions. Give each sensor a distinct unique_id. The existing entry was not overwritten.",
+      "yaml_identity_changed": "This YAML edit changes an imported sensor identity. Follow the Repairs notice to add its existing unique ID, or configure the existing entry in the UI. The existing sensor was preserved.",
+      "invalid_config": "The YAML definition has invalid settings. Check the Average Sensor log message, correct the definition and reload. No entry was created or overwritten."
     }
   },
   "options": {
@@ -123,7 +126,8 @@
       "invalid_undefined_options": "Extending the last known reading requires ignore_undef to be enabled.",
       "invalid_weights": "Use nonnegative numeric weights for configured source IDs, with at least one positive weight.",
       "invalid_source_attributes": "Map configured source IDs to nonempty attribute names.",
-      "invalid_undefined_value": "Use a finite numeric undefined-value fallback; boolean, infinity and NaN values are not allowed."
+      "invalid_undefined_value": "Use a finite numeric undefined-value fallback; boolean, infinity and NaN values are not allowed.",
+      "invalid_name": "Enter a nonempty sensor name."
     }
   },
   "issues": {
@@ -134,6 +138,10 @@
     "duplicate_yaml_id": {
       "title": "Resolve duplicate Average Sensor YAML IDs",
       "description": "Multiple Average Sensor definitions conflict on unique_id `{unique_id}`. Their imports were refused to preserve the existing sensor. Give each YAML sensor a distinct unique_id, then reload Average Sensor. The historical __legacy__ marker may be used by multiple sensors."
+    },
+    "yaml_identity_changed": {
+      "title": "Preserve the identity of {name}",
+      "description": "A YAML definition now has a different import identity from an existing Average Sensor. Existing sensors were left unchanged.\n\nTo update an existing sensor through YAML, add its matching unique ID from the list below to the definition, then reload Average Sensor:\n\n{candidates}\n\nThis adopts that existing entry and retains its entity ID and history. If more than one sensor is listed, choose the entity you intended to edit. To create a separate sensor, give it a new, distinct unique_id instead. Alternatively, verify the existing entry, comment out its YAML and edit it through Configure. Do not delete existing entries or entities to switch methods."
     }
   }
 }
