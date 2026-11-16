@@ -47,3 +47,15 @@ jobs:
         run: >-
           python -m pytest -n 2 --dist=loadfile -q --durations=10
           --tb=short --show-capture=no --disable-warnings --maxfail=3
+
+  minimum:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: Minimum supported Home Assistant
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check native lifecycle and UI schemas on the declared minimum
+        run: python3 scripts/check_minimum.py

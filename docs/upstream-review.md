@@ -1,5 +1,11 @@
 # Upstream review — November 14, 2026
 
+> This page records earlier upstream investigations. Subsequent independent-audit
+> fixes add configurable history-window and query-wait limits; see
+> [History safety limits](configuration.md#history-safety-limits) and
+> [audit remediation](audit-remediation.md) for the current behavior.
+
+
 This fork tracks applicable contributions from Limych/ha-average. Upstream issues
 remain upstream; this document records their disposition in this fork, without
 claiming to have closed them or reproduced installation-specific failures.

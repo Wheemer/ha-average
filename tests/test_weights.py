@@ -114,7 +114,10 @@ async def test_history_weights_apply_after_per_source_time_weighting(hass):
         "sensor.b": [State("sensor.b", "90", last_changed=start)],
     }
     recorder = Mock(async_add_executor_job=AsyncMock(return_value=history))
-    with patch("custom_components.average.sensor.get_instance", return_value=recorder):
+    with (
+        patch("custom_components.average.sensor.get_instance", return_value=recorder),
+        patch("custom_components.average.sensor.dt_util.now", return_value=end),
+    ):
         await sensor._async_update_state()
     assert sensor.native_value == 43.33
     assert sensor.trending_towards == pytest.approx((43.33 + 56.67) / 2)

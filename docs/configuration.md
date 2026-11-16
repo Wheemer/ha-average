@@ -39,6 +39,8 @@ that reflects whether a partial reading is acceptable.
 | **Averaging window** | Use recorded history for a fixed duration. Leave unset for a current-value average. |
 | **Start / end time templates** | Use templates for a custom calculation period. |
 | **History update interval** | Minimum interval between history refreshes; defaults to 20 seconds. Actual refresh timing also depends on Home Assistant's polling schedule. |
+| **Maximum history query window** | Refuse oversized recorder ranges; defaults to 31 days. |
+| **History query timeout** | Stop waiting after 60 seconds by default; retain the running SQL job to prevent overlaps. |
 | **Source attributes** | Optional mapping of source IDs to attribute names, such as `weather.home: humidity`. |
 | **Source weights** | Optional mapping of configured source IDs to relative weights. Leave empty for equal weights. |
 | **Decimal places** | Decimal places used to round the result; defaults to 2. |
@@ -115,13 +117,18 @@ You can also keep managing a sensor from YAML. Leave its definition active and
 make its changes there: active YAML is reimported on startup or YAML reload and
 may overwrite later UI edits. Use one configuration source for each sensor.
 After editing active YAML, the Average Sensor reload service or Quick Reload
-applies changed settings to the loaded entry. Unchanged definitions do not trigger
+applies changed settings to the loaded entry, including removal of optional keys.
+A removed optional setting returns to its default. Unchanged definitions do not trigger
 an extra entry reload. As with a UI save, reloading a changed entry can briefly
 affect its availability. Remove unwanted entries explicitly through **Devices & services**.
 
 Do not change existing unique IDs or delete and recreate sensors as a migration
-shortcut. The historical `unique_id: __legacy__` setting remains supported for
-installations already using it; it is not recommended for new sensors.
+shortcut. Each ordinary explicit `unique_id` must belong to only one YAML block.
+Conflicting definitions raise a Repairs issue and are refused without overwriting
+an existing entry. Correct the conflicting IDs and reload Average Sensor.
+The historical `unique_id: __legacy__` marker remains supported for multiple
+existing sensors; each sensor keeps its historical entity unique ID. It is not
+recommended for new sensors.
 
 ### Average humidity from weather and a local sensor
 
@@ -203,6 +210,8 @@ is applied. Clear the mapping to restore equal weighting.
 | `duration` | Unset | Averaging window as a time-period mapping, seconds, or a quoted duration string. |
 | `start` / `end` | Unset | Templates returning datetimes or timestamps. |
 | `scan_interval` | 20 seconds | Minimum interval between history refreshes. |
+| `max_history_period` | 31 days | Maximum recorder range allowed per calculation. Oversized ranges make the sensor unavailable and log an error; they are never truncated. |
+| `history_query_timeout` | 60 seconds | Maximum wait for each recorder query. Timed-out SQL finishes in the background; no replacement query overlaps it. |
 | `source_attributes` | Unset | Mapping of explicitly configured source entity IDs to attribute names. Unmapped sources keep their default reading. |
 | `weights` | Unset | Mapping of explicitly configured source entity IDs to nonnegative relative weights. Omitted sources use weight 1. At least one source must have a positive weight. |
 | `precision` | `2` | Decimal places for the result. |
@@ -240,6 +249,33 @@ Or use a quoted duration string:
 duration: "02:30:00"
 ```
 
+### History safety limits
+
+The effective recorder range is limited to 31 days by default, including ranges
+produced by templates. An excessive range makes the sensor unavailable and logs
+an error before querying Recorder. It never silently averages a shortened window.
+For an existing longer average, set **Advanced > Maximum history query window**
+or `max_history_period` to a deliberately chosen positive duration:
+
+```yaml
+duration:
+  days: 60
+max_history_period:
+  days: 90
+history_query_timeout:
+  minutes: 2
+```
+
+A query exceeding the timeout makes the sensor unavailable and logs a warning.
+Python cannot stop SQL already executing in Recorder's thread: the query continues
+in the background, and further updates and reload replacements wait for its real
+completion before starting another query. Updates recover automatically afterward.
+A permanently blocked database query still needs its database problem resolved;
+the timeout does not terminate SQL or repair the database. Larger configured
+windows can still consume substantial memory and CPU. These limits affect history
+averages, not current-value averages. Both controls are editable through YAML and
+UI options; clearing either UI control restores its default limit.
+
 ### Undefined history values
 
 By default, undefined intervals are not assigned an invented numeric value. The
@@ -268,7 +304,7 @@ source sensors**.
 ## Limitations
 
 - **History retention:** windows use raw recorder state history. Long-term statistics are not queried automatically. A monthly window needs the relevant raw history retained for that period.
-- **Large windows:** frequently changing sources can produce large queries. A longer update interval reduces frequency, but does not remove the cost of processing a large history. Recorder results are decoded in the recorder executor, and history averaging yields periodically so other Home Assistant callbacks can run during long calculations. A cancelled refresh does not start replacement SQL work for that sensor until its existing query finishes. These measures do not impose a database-query time limit.
+- **Large windows:** frequently changing sources can produce large queries. A longer update interval reduces frequency, but does not remove the cost of processing a large history. Recorder results are decoded in the recorder executor, and history averaging yields periodically so other Home Assistant callbacks can run during long calculations. A cancelled refresh does not start replacement SQL work for that sensor until its existing query finishes. The configurable maximum window prevents accidental oversized ranges, and a timeout bounds how long the sensor waits. The timeout cannot terminate SQL already running.
 - **Temperature units:** unmapped weather, climate, and water-heater temperatures retain the existing assumption that values use Home Assistant's configured unit. Explicit temperature-attribute selections use reported units when available. Historical unit changes cannot always be reconstructed.
 - **Compatible inputs:** use readings that represent the same quantity with compatible units. This integration does not perform arbitrary unit normalization for non-temperature values.
 - **Consumption totals:** averaging an increasing meter reading gives its average level, not consumption per day. Use consumption differences or an appropriate utility meter for that quantity.

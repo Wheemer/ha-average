@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import math
 import numbers
-from asyncio import CancelledError, Future, ensure_future, shield, sleep
+from asyncio import CancelledError, Future, ensure_future, shield, sleep, timeout
 from contextlib import suppress
 from datetime import datetime, timedelta
 from functools import partial
@@ -92,7 +92,9 @@ from .const import (
     CONF_CALCULATE_TO_NOW_UNDEF,
     CONF_DURATION,
     CONF_END,
+    CONF_HISTORY_QUERY_TIMEOUT,
     CONF_IGNORE_UNDEF,
+    CONF_MAX_HISTORY_PERIOD,
     CONF_MAX_SOURCE_AGE,
     CONF_PERIOD_KEYS,
     CONF_PRECISION,
@@ -101,17 +103,25 @@ from .const import (
     CONF_SOURCE_ATTRIBUTES,
     CONF_START,
     CONF_WEIGHTS,
+    DEFAULT_HISTORY_QUERY_TIMEOUT,
+    DEFAULT_MAX_HISTORY_PERIOD,
     DEFAULT_NAME,
     DEFAULT_PRECISION,
     DOMAIN,
     UPDATE_MIN_TIME,
 )
+from .validation import finite_number
 from .weights import normalize_weights
+from .yaml_import import LEGACY_UNIQUE_ID
 
 _LOGGER = logging.getLogger(__name__)
 YAML_IMPORT_ISSUE_ID = "yaml_imported"
 HISTORY_PROCESSING_BATCH_SIZE = 512
 DATA_PENDING_HISTORY = f"{DOMAIN}_pending_history"
+
+
+class HistoryQueryError(HomeAssistantError):
+    """A recorder refresh failed safely and can be retried."""
 
 
 def _materialized_history(  # noqa: PLR0913
@@ -143,6 +153,17 @@ def _materialized_history(  # noqa: PLR0913
     return result
 
 
+def _stored_undefined_value(value: Any) -> int | float | None:
+    """Defend against invalid values saved before finite-number validation."""
+    if value is None:
+        return None
+    try:
+        return finite_number(value)
+    except (TypeError, ValueError):
+        _LOGGER.warning("Ignoring invalid stored process_undef_as value")
+        return None
+
+
 def check_period_keys(conf: ConfigType) -> ConfigType:
     """Ensure maximum 2 of CONF_PERIOD_KEYS are provided."""
     count = sum(param in conf for param in CONF_PERIOD_KEYS)
@@ -156,6 +177,15 @@ def check_period_keys(conf: ConfigType) -> ConfigType:
     if conf.get(CONF_CALCULATE_TO_NOW_UNDEF) and not conf.get(CONF_IGNORE_UNDEF):
         msg = "calculate_to_now_undef requires ignore_undef"
         raise vol.Invalid(msg)
+    if CONF_PROCESS_UNDEF_AS in conf:
+        try:
+            finite_number(conf[CONF_PROCESS_UNDEF_AS])
+        except (TypeError, ValueError) as err:
+            raise vol.Invalid(str(err)) from err
+    for key in (CONF_MAX_HISTORY_PERIOD, CONF_HISTORY_QUERY_TIMEOUT):
+        if key in conf and conf[key] <= timedelta(0):
+            message = f"{key} must be greater than zero"
+            raise vol.Invalid(message)
     if CONF_WEIGHTS in conf:
         try:
             conf[CONF_WEIGHTS] = normalize_weights(
@@ -183,6 +213,8 @@ PLATFORM_SCHEMA = vol.All(
             vol.Optional(CONF_START): cv.template,
             vol.Optional(CONF_END): cv.template,
             vol.Optional(CONF_DURATION): cv.positive_time_period,
+            vol.Optional(CONF_MAX_HISTORY_PERIOD): cv.positive_time_period,
+            vol.Optional(CONF_HISTORY_QUERY_TIMEOUT): cv.positive_time_period,
             vol.Optional(CONF_PRECISION, default=DEFAULT_PRECISION): int,
             vol.Optional(CONF_PROCESS_UNDEF_AS): vol.Any(int, float),
             vol.Optional(CONF_IGNORE_UNDEF, default=False): cv.boolean,
@@ -248,6 +280,13 @@ def _entry_unique_id(
 ) -> str:
     """Return the sensor unique ID for a config entry."""
     if unique_id := options.get(CONF_UNIQUE_ID):
+        if unique_id == LEGACY_UNIQUE_ID:
+            # A legacy hash identifies the existing entity, not its new sources.
+            # Retain it when options or active YAML edits reload the entry.
+            registry = er.async_get(hass)
+            for entity in er.async_entries_for_config_entry(registry, entry_id):
+                if entity.domain == SENSOR_DOMAIN and entity.platform == DOMAIN:
+                    return entity.unique_id
         return unique_id
 
     legacy_unique_id = slugify(options[CONF_NAME])
@@ -285,7 +324,13 @@ def _entry_config(hass: HomeAssistant, config_entry: ConfigEntry) -> ConfigType:
         if value:
             config[key] = Template(value, hass)
 
-    for key in (CONF_DURATION, CONF_MAX_SOURCE_AGE, CONF_SCAN_INTERVAL):
+    for key in (
+        CONF_DURATION,
+        CONF_MAX_SOURCE_AGE,
+        CONF_SCAN_INTERVAL,
+        CONF_MAX_HISTORY_PERIOD,
+        CONF_HISTORY_QUERY_TIMEOUT,
+    ):
         duration = _duration_from_selector(options.get(key))
         if duration is not None:
             config[key] = duration
@@ -345,9 +390,17 @@ class AverageSensor(RestoreSensor):
         self._start_template = start
         self._end_template = end
         self._duration = duration
+        self._max_history_period = config.get(
+            CONF_MAX_HISTORY_PERIOD, DEFAULT_MAX_HISTORY_PERIOD
+        )
+        self._history_query_timeout = config.get(
+            CONF_HISTORY_QUERY_TIMEOUT, DEFAULT_HISTORY_QUERY_TIMEOUT
+        )
+        self._history_range_exceeded = False
+        self._recorder_unavailable = False
         self._period = self.start = self.end = None
         self._precision = config.get(CONF_PRECISION, DEFAULT_PRECISION)
-        self._undef = config.get(CONF_PROCESS_UNDEF_AS)
+        self._undef = _stored_undefined_value(config.get(CONF_PROCESS_UNDEF_AS))
         self._weights = config.get(CONF_WEIGHTS, {})
         self._source_attributes = config.get(CONF_SOURCE_ATTRIBUTES, {})
         self._ignore_undef = config.get(CONF_IGNORE_UNDEF, False)
@@ -532,8 +585,10 @@ class AverageSensor(RestoreSensor):
         if not self._has_state(str(native_value)):
             return
 
-        with suppress(TypeError, ValueError):
-            native_value = float(native_value)
+        try:
+            native_value = finite_number(float(native_value))
+        except (TypeError, ValueError, OverflowError):
+            return
 
         self._attr_native_value = native_value
         self._attr_native_unit_of_measurement = native_unit
@@ -592,11 +647,8 @@ class AverageSensor(RestoreSensor):
             entity_unit = ha_unit
         else:
             temperature = state.state
-            entity_unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
-            if entity_unit is None and self._is_temperature_device_class(
-                state.attributes.get(ATTR_DEVICE_CLASS)
-            ):
-                entity_unit = ha_unit
+            # Without source metadata, retain the documented HA-unit assumption.
+            entity_unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) or ha_unit
 
         if not self._has_state(temperature):
             return None
@@ -703,14 +755,18 @@ class AverageSensor(RestoreSensor):
         shared = self.hass.data.get(DATA_PENDING_HISTORY, {}).get(self._entry_id)
         return shared is not None and not shared.done()
 
+    def _updates_blocked(self) -> bool:
+        """Keep pending SQL and stopped entities from starting new calculations."""
+        if self._stopping or self.hass.is_stopping:
+            return True
+        if self._history_query_pending:
+            self._clear_history_result()
+            return True
+        return False
+
     async def async_update(self) -> None:
         """Update the sensor state if it needed."""
-        if (
-            self._stopping
-            or self.hass.is_stopping
-            or self._update_in_progress
-            or self._history_query_pending
-        ):
+        if self._update_in_progress or self._updates_blocked():
             return
 
         if not self._has_period:
@@ -746,6 +802,9 @@ class AverageSensor(RestoreSensor):
 
     def _parse_period_boundary(self, value: Any, field: str) -> datetime | None:
         """Parse a boundary without raising on sources missing during startup."""
+        if isinstance(value, bool):
+            _LOGGER.error('Period boundary "%s" must not be a boolean', field)
+            return None
         if not self._has_state(value):
             _LOGGER.debug('Period boundary "%s" is not available yet', field)
             return None
@@ -754,7 +813,7 @@ class AverageSensor(RestoreSensor):
             parsed = dt_util.parse_datetime(value)
         if parsed is None:
             with suppress(TypeError, ValueError, OverflowError, OSError):
-                parsed = dt_util.utc_from_timestamp(math.floor(float(value)))
+                parsed = dt_util.utc_from_timestamp(float(value))
         if parsed is None:
             _LOGGER.error(
                 'Parsing error: field "%s" must be a datetime or a timestamp', field
@@ -822,9 +881,60 @@ class AverageSensor(RestoreSensor):
         if end <= start:
             return
 
+        if end - start > self._max_history_period:
+            if not self._history_range_exceeded:
+                _LOGGER.error(
+                    'History window for "%s" exceeds max_history_period (%s); '
+                    "no query was issued. Correct the period or explicitly "
+                    "increase the YAML/UI limit",
+                    self.name,
+                    self._max_history_period,
+                )
+            self._history_range_exceeded = True
+            return
+        self._history_range_exceeded = False
         self._period = start, end
         self.start = start
         self.end = end
+
+    def _source_is_temperature(self, state: State) -> bool:
+        """Classify the selected reading rather than an unrelated entity attribute."""
+        if attribute := self._source_attributes.get(state.entity_id):
+            return attribute in (
+                "temperature",
+                "current_temperature",
+                "dew_point",
+                "apparent_temperature",
+            )
+        return (
+            self._is_temperature_device_class(state.attributes.get(ATTR_DEVICE_CLASS))
+            or split_entity_id(state.entity_id)[0]
+            in (WEATHER_DOMAIN, CLIMATE_DOMAIN, WATER_HEATER_DOMAIN)
+            or state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) in TEMPERATURE_UNITS
+        )
+
+    def _prepare_source_mode(self) -> None:
+        """Choose fresh, deterministic metadata before consuming any readings."""
+        self._temperature_mode = None
+        self._attr_native_unit_of_measurement = None
+        self._attr_device_class = None
+        self._attr_icon = None
+        states = [
+            state
+            for entity_id in self.sources
+            if (state := self.hass.states.get(entity_id)) is not None
+        ]
+        # Explicit attributes take precedence over default metadata; temperature
+        # takes precedence over unitless sources. Never depend on YAML/UI ordering.
+        for state in sorted(
+            states,
+            key=lambda state: (
+                self._source_is_temperature(state),
+                bool(self._source_attributes.get(state.entity_id)),
+                state.entity_id,
+            ),
+        ):
+            self._init_mode(state)
 
     def _init_mode(self, state: State) -> None:
         """Initialize sensor mode."""
@@ -907,18 +1017,49 @@ class AverageSensor(RestoreSensor):
             uses_attributes=uses_attributes,
             needs_attributes=uses_attributes or bool(self._temperature_mode),
         )
+        try:
+            recorder = get_instance(self.hass)
+        except KeyError as err:
+            if not self._recorder_unavailable:
+                _LOGGER.warning(
+                    'Recorder is unavailable for "%s"; history averaging will '
+                    "retry when Recorder is ready",
+                    self.name,
+                )
+            self._recorder_unavailable = True
+            raise HistoryQueryError from err
+        self._recorder_unavailable = False
         pending = ensure_future(
-            get_instance(self.hass).async_add_executor_job(
-                query, self.hass, start, end, entity_id
-            )
+            recorder.async_add_executor_job(query, self.hass, start, end, entity_id)
         )
         self._pending_history_query = pending
         shared = self.hass.data.setdefault(DATA_PENDING_HISTORY, {})
         if self._entry_id is not None:
             shared[self._entry_id] = pending
 
+        timeout_reported = False
+
+        @callback
+        def warn_pending_query() -> None:
+            nonlocal timeout_reported
+            if timeout_reported or pending.done():
+                return
+            timeout_reported = True
+            _LOGGER.warning(
+                'Recorder query for "%s" timed out after %s; the sensor is '
+                "unavailable until SQL finishes. No replacement query will overlap it",
+                entity_id,
+                self._history_query_timeout,
+            )
+
+        # Keep the deadline observable even if a reload cancels the waiter.
+        timeout_handle = self.hass.loop.call_later(
+            self._history_query_timeout.total_seconds(), warn_pending_query
+        )
+
         @callback
         def query_done(future: Future) -> None:
+            timeout_handle.cancel()
             if self._pending_history_query is future:
                 self._pending_history_query = None
             if self._entry_id is not None and shared.get(self._entry_id) is future:
@@ -928,22 +1069,55 @@ class AverageSensor(RestoreSensor):
         def abandoned_query_done(future: Future) -> None:
             if not future.cancelled() and (error := future.exception()) is not None:
                 _LOGGER.error(
-                    "Recorder query failed after its refresh was cancelled",
+                    "Recorder query failed after its refresh ended",
                     exc_info=(type(error), error, error.__traceback__),
                 )
 
         pending.add_done_callback(query_done)
+        query_timeout = timeout(self._history_query_timeout.total_seconds())
         try:
             # Cancelling an asyncio Future cannot stop an executing SQL query.
             # Retain its real completion state so the next poll cannot overlap it.
-            return await shield(pending)
+            async with query_timeout:
+                return await shield(pending)
+        except TimeoutError as err:
+            if not query_timeout.expired():
+                raise
+            pending.add_done_callback(abandoned_query_done)
+            warn_pending_query()
+            raise HistoryQueryError from err
         except CancelledError:
             pending.add_done_callback(abandoned_query_done)
             raise
 
+    async def _async_history_for_source(
+        self, start: datetime, end: datetime, entity_id: str, *, uses_attributes: bool
+    ) -> dict[str, list[State]] | None:
+        """Discard partial results on a failed or cancelled refresh."""
+        try:
+            return await self._async_query_history(
+                start, end, entity_id, uses_attributes=uses_attributes
+            )
+        except HistoryQueryError:
+            self._clear_history_result()
+            return None
+        except CancelledError:
+            self._clear_history_result()
+            raise
+
+    def _clear_history_result(self) -> None:
+        """Never publish a stale value with partial diagnostics after a failure."""
+        self._attr_native_value = None
+        self.available_sources = self.count = 0
+        self.min_value = self.max_value = None
+        self.min_datetime = self.max_datetime = self.trending_towards = None
+        self._history_complete = False
+        self._last_history_metadata = None
+        self._last_update = None
+
     async def _async_update_state(self) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         """Update the sensor state."""
-        if self._stopping or self.hass.is_stopping or self._history_query_pending:
+        if self._updates_blocked():
             return
         _LOGGER.debug('Updating sensor "%s"', self.name)
         self._temperature_conversion_errors.clear()
@@ -956,16 +1130,12 @@ class AverageSensor(RestoreSensor):
 
         if self._period is None:
             if self._has_period:
-                self._attr_native_value = None
-                self.available_sources = self.count = 0
-                self.min_value = self.max_value = None
-                self.min_datetime = self.max_datetime = self.trending_towards = None
-                self._history_complete = False
-                self._last_history_metadata = None
+                self._clear_history_result()
             else:
                 self._update_state_no_period()
             return
 
+        self._prepare_source_mode()
         now = dt_util.now()
         start, end = self._period
         if p_period is None:
@@ -981,13 +1151,13 @@ class AverageSensor(RestoreSensor):
         p_start = dt_util.as_utc(p_start)
         p_end = dt_util.as_utc(p_end)
 
-        # Compute integer timestamps
-        now_ts = math.floor(dt_util.as_timestamp(now))
-        start_ts = math.floor(dt_util.as_timestamp(start))
-        end_ts = math.floor(dt_util.as_timestamp(end))
-        actual_end_ts = math.floor(dt_util.as_timestamp(actual_end))
-        p_start_ts = math.floor(dt_util.as_timestamp(p_start))
-        p_end_ts = math.floor(dt_util.as_timestamp(p_end))
+        # Keep full timestamp precision, including sub-second history windows.
+        now_ts = dt_util.as_timestamp(now)
+        start_ts = dt_util.as_timestamp(start)
+        end_ts = dt_util.as_timestamp(end)
+        actual_end_ts = dt_util.as_timestamp(actual_end)
+        p_start_ts = dt_util.as_timestamp(p_start)
+        p_end_ts = dt_util.as_timestamp(p_end)
 
         metadata = self._history_metadata_signature()
         # A closed period can be cached only after a complete calculation.
@@ -1016,7 +1186,7 @@ class AverageSensor(RestoreSensor):
         # pylint: disable=too-many-nested-blocks
         for entity_id in self.sources:
             # A previous query/batch may have yielded through STOP or a reload.
-            if self._stopping or self.hass.is_stopping or self._history_query_pending:
+            if self._updates_blocked():
                 return
             _LOGGER.debug('Processing entity "%s"', entity_id)
 
@@ -1030,17 +1200,17 @@ class AverageSensor(RestoreSensor):
                 history_complete = False
                 continue
 
-            self._init_mode(state)
-
             value = 0
             elapsed = 0
             trending_last_state = None
 
             # Get history between start and now
             uses_attributes = self._uses_attribute_value(entity_id)
-            history_list = await self._async_query_history(
+            history_list = await self._async_history_for_source(
                 start, end, entity_id, uses_attributes=uses_attributes
             )
+            if history_list is None:
+                return
 
             if self._stopping or self.hass.is_stopping:
                 return
@@ -1094,13 +1264,14 @@ class AverageSensor(RestoreSensor):
 
                 # Count time elapsed between last history state and now
                 if last_state is None:
-                    value = value / elapsed if self._ignore_undef and elapsed else None
+                    value = (
+                        value / elapsed if self._ignore_undef and elapsed > 0 else None
+                    )
                 else:
                     last_elapsed = end_ts - last_time
                     value += last_state * last_elapsed
                     elapsed += last_elapsed
-                    if elapsed:
-                        value /= elapsed
+                    value = value / elapsed if elapsed > 0 else None
                     trending_last_state = last_state
 
                 _LOGGER.debug("Historical average state: %s", value)
@@ -1178,13 +1349,22 @@ class AverageSensor(RestoreSensor):
 
     def _weighted_average(self, values: list[tuple[float, float]]) -> float | None:
         """Combine source values, preserving equal weighting when unconfigured."""
-        if not values or not (scale := max(weight for _, weight in values)):
+        if not values or any(
+            not math.isfinite(value) or not math.isfinite(weight) or weight < 0
+            for value, weight in values
+        ):
+            return None
+        if not (scale := max(weight for _, weight in values)):
             return None
         total_weight = sum(weight / scale for _, weight in values)
-        average = round(
-            sum(value * (weight / scale) for value, weight in values) / total_weight,
-            self._precision,
+        # Normalize before multiplication/summing so finite large sources do not
+        # overflow merely because multiple sources contribute to the mean.
+        average = sum(
+            value * ((weight / scale) / total_weight) for value, weight in values
         )
+        if not math.isfinite(average):
+            return None
+        average = round(average, self._precision)
         return int(average) if self._precision < 1 else average
 
     def _log_temperature_conversion_errors(self) -> None:
@@ -1201,6 +1381,7 @@ class AverageSensor(RestoreSensor):
     def _update_state_no_period(self) -> None:
         """Update the sensor state then period is not set."""
         self._temperature_conversion_errors.clear()
+        self._prepare_source_mode()
         self.available_sources = 0
         values = []
         self.count = 0
@@ -1220,8 +1401,6 @@ class AverageSensor(RestoreSensor):
                 continue
             if self._is_source_stale(state, now):
                 continue
-
-            self._init_mode(state)
 
             # Get current state
             value = self._get_state_value(state)
