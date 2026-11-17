@@ -13,7 +13,7 @@ from homeassistant.const import Platform
 # Base component constants
 NAME: Final = "Average Sensor"
 DOMAIN: Final = "average"
-VERSION: Final = "2.5.0"
+VERSION: Final = "2.6.0"
 ISSUE_URL: Final = "https://github.com/Wheemer/ha-average/issues"
 
 STARTUP_MESSAGE: Final = f"""
