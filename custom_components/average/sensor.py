@@ -175,7 +175,7 @@ def _stored_undefined_value(value: Any) -> int | float | None:
         return None
     try:
         return finite_number(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         _LOGGER.warning("Ignoring invalid stored process_undef_as value")
         return None
 
@@ -270,7 +270,6 @@ async def async_setup_platform(
         is_persistent=True,
         severity=IssueSeverity.WARNING,
         translation_key="yaml_imported",
-        translation_placeholders={"name": "Average Sensor YAML configuration"},
     )
 
 
@@ -509,7 +508,7 @@ class AverageSensor(RestoreSensor):
                 try:
                     if not math.isfinite(float(value)):
                         return False
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     return False
             if self.available_sources != self.count_sources:
                 return False
@@ -623,7 +622,7 @@ class AverageSensor(RestoreSensor):
             return
         try:
             native_value = finite_number(float(native_value))
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             return
 
         self._attr_native_value = native_value
@@ -695,7 +694,7 @@ class AverageSensor(RestoreSensor):
             temperature = TemperatureConverter.convert(
                 float(temperature), entity_unit, ha_unit
             )
-        except (HomeAssistantError, TypeError, ValueError):
+        except HomeAssistantError, TypeError, ValueError:
             if not log_errors:
                 return None
             failures = self._temperature_conversion_errors.get(state.entity_id, 0) + 1
@@ -758,7 +757,7 @@ class AverageSensor(RestoreSensor):
 
         try:
             value = float(raw_value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             _LOGGER.debug('Ignoring nonnumeric source value "%s"', raw_value)
             return None
         if not math.isfinite(value):
@@ -838,7 +837,7 @@ class AverageSensor(RestoreSensor):
         self._update_in_progress = True
         try:
             await self._async_update_state()
-        except (Exception, CancelledError):
+        except Exception, CancelledError:
             self._clear_history_result()
             raise
         finally:
@@ -1218,7 +1217,7 @@ class AverageSensor(RestoreSensor):
             self._refresh_tasks.add(task)
         try:
             await self._async_compute_average()
-        except (Exception, CancelledError):
+        except Exception, CancelledError:
             self._clear_history_result()
             raise
         finally:

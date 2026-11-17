@@ -98,3 +98,19 @@ accessed and no release was published for this follow-up.
 This does not claim that SQL execution can be cancelled. Remaining informational
 observations are documented rather than treated as runtime bugs. No live Home
 Assistant was accessed and no release was published.
+
+
+## Final three housekeeping items
+
+- **I17:** developer setup/bootstrap/install helpers use credential-free pip/git
+  arguments and GitHub-only askpass, with credentials from environment or private
+  files. Unsafe positional/--token forms and nested credential-bearing requirement
+  URLs are rejected without echoing their values. Release-note tooling also uses
+  environment/file auth. Bootstrap retains its Git-only dependency scope.
+- **I14:** align Ruff, Black, Pylint and manual pyupgrade to Python 3.14, matching
+  both the declared development minimum and the minimum supported Core image
+  (Python 3.14.2). Update pyupgrade to a release supporting that target.
+- **I9:** remove the unused name placeholder from the shared import notice.
+
+These changes do not alter sensor identities, YAML/UI configuration behavior,
+Home Assistant installations or published releases.

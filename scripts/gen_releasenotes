@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Helper script to generate release notes."""
 
-import argparse
 import logging
 import os
 import re
 import subprocess
 from datetime import datetime
+from urllib.parse import urlsplit
 
-from github import Github, GithubException, Repository, Tag
+from github import Auth, Github, GithubException, Repository, Tag
 from packaging.version import Version
+from dev_auth import SafeArgumentParser, github_token
 
 # http://docs.python.org/2/howto/logging.html#library-config
 # Avoids spurious error messages if no logger is configured by the user
@@ -174,9 +175,22 @@ def bump_version(version: Version) -> Version:
     return Version(str(temp))
 
 
-def main():
+def _default_repo():
+    """Extract the repository path without logging credential-bearing remotes."""
+    remote = subprocess.run(
+        ["git", "config", "--get", "remote.origin.url"],
+        cwd=ROOT, capture_output=True, check=True, text=True,
+    ).stdout.strip()
+    if "://" in remote:
+        remote = urlsplit(remote).path.lstrip("/")
+    elif remote.startswith("git@github.com:"):
+        remote = remote.split(":", 1)[1]
+    return remote.removesuffix(".git")
+
+
+def main(argv=None):
     """Execute script."""
-    parser = argparse.ArgumentParser(
+    parser = SafeArgumentParser(
         description=f"Release notes generator. Version {VERSION}"
     )
     parser.add_argument(
@@ -193,28 +207,17 @@ def main():
         help="Preview release notes generation without running it.",
     )
     parser.add_argument(
-        "--token",
-        help="Github token to access to repository.",
-        # required=True,
-    )
-    parser.add_argument(
         "--repo",
         help="Github repository (default: %(default)s).",
-        default=subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
-            stdout=subprocess.PIPE,
-            check=True,
-        )
-        .stdout.decode("UTF-8")
-        .replace("https://github.com/", "")
-        .replace(".git", "")
-        .strip(),
+        default=_default_repo(),
     )
     parser.add_argument(
         "--release",
         help="Github release tag to update release notes.",
     )
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", arguments.repo) is None:
+        parser.error("Invalid repository")
 
     if arguments.verbose:
         _LOGGER.setLevel(logging.DEBUG)
@@ -223,7 +226,11 @@ def main():
         _LOGGER.debug("Dry run mode ENABLED")
         print("!!! Dry Run !!!")
 
-    github = Github(arguments.token)
+    try:
+        token = github_token()
+    except ValueError:
+        parser.exit(2, "Unable to load GitHub credentials from environment/file.\n")
+    github = Github(auth=Auth.Token(token)) if token else Github()
     _LOGGER.debug("Repo: %s", arguments.repo)
     repo = github.get_repo(arguments.repo)
     if arguments.release is None:

@@ -47,3 +47,23 @@ This project and contributions are covered by the existing
 [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International license](LICENSE.md).
 Keep original attribution and license notices. This fork does not claim an MIT
 license or permission to relicense the inherited work.
+
+
+## Developer credentials
+
+The integration needs no GitHub credential. Optional developer helpers accept
+`GITHUB_TOKEN_FILE` (preferred, pointing to a private single-token file) or
+`GITHUB_TOKEN` supplied by your credential manager/CI. They do not read Home
+Assistant `secrets.yaml`, accept positional tokens, or support `--token`.
+
+```sh
+GITHUB_TOKEN_FILE=/secure/path/github-token scripts/install_requirements requirements-dev.txt
+GITHUB_TOKEN_FILE=/secure/path/github-token scripts/gen_releasenotes --repo Wheemer/ha-average --dry-run
+```
+
+Use credential-free Git URLs such as
+`git+https://github.com/owner/private-repository.git@ref`. Git receives GitHub
+HTTPS credentials through its askpass pipe; tokens are never substituted into
+pip/git arguments. Legacy `{GITHUB_TOKEN}` URLs and credential-bearing URLs are
+rejected with a generic message. Keep token files outside the repository with
+owner-only permissions. The bootstrap helper installs Git dependencies only.
