@@ -49,7 +49,9 @@ class ShutdownTests(unittest.IsolatedAsyncioTestCase):
         import textwrap
 
         tree = ast.parse(
-            textwrap.dedent(inspect.getsource(module.AverageSensor._async_update_state))
+            textwrap.dedent(
+                inspect.getsource(module.AverageSensor._async_calculate_state)
+            )
         )
 
         class RemoveStopGuards(ast.NodeTransformer):
@@ -66,7 +68,7 @@ class ShutdownTests(unittest.IsolatedAsyncioTestCase):
         exec(compile(tree, "unguarded_refresh", "exec"), namespace)
 
         class OldSensor(module.AverageSensor):
-            _async_update_state = namespace["_async_update_state"]
+            _async_calculate_state = namespace["_async_calculate_state"]
 
         self.executor.shutdown(wait=True)
 

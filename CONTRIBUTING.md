@@ -7,7 +7,8 @@ security vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## Development
 
-Branch from `dev`. Use a Python 3.14 virtual environment and install
+Clone the repository and branch from `dev`; generated source archives omit the
+test suite and development dotfiles. Use a Python 3.14 virtual environment and install
 `python -m pip install -r requirements-dev.txt`. Install hooks with
 `pre-commit install`.
 
@@ -15,6 +16,7 @@ Before submitting a pull request, run:
 
 ```sh
 python scripts/metadata.py --check
+python -m mypy custom_components/average
 python -m ruff check .
 python -m ruff format . --check
 python -m bandit -r custom_components -c tests/bandit.yaml

@@ -26,8 +26,10 @@ to **off**.
 | **On** | Mark the average unavailable if any required source is missing, unknown, unavailable, nonnumeric, nonfinite, or older than a configured source-age limit. |
 
 Strict history averages publish source loss immediately. History recalculation
-still respects the update interval. Valid source readings allow recovery; an
-undefined-value fallback never overrides the strict source requirement.
+still respects the update interval. After sources recover, availability returns
+when a successful recalculation includes every source; a previously partial
+average is not relabelled as a complete one. An undefined-value fallback never
+overrides the strict source requirement.
 
 For averages used by automations or control systems, choose availability behavior
 that reflects whether a partial reading is acceptable.
@@ -215,7 +217,7 @@ is applied. Clear the mapping to restore equal weighting.
 | `require_all_sources` | `false` | Require every source to be valid. |
 | `duration` | Unset | Averaging window as a time-period mapping, seconds, or a quoted duration string. |
 | `start` / `end` | Unset | Templates returning datetimes or timestamps. |
-| `scan_interval` | 20 seconds | Minimum interval between history refreshes. |
+| `scan_interval` | 20 seconds | Configurable positive minimum between history refreshes. Shorter values can increase SQL frequency, especially with strict source events; there is no forced 20-second floor. |
 | `max_history_period` | 31 days | Maximum recorder range allowed per calculation. Oversized ranges make the sensor unavailable and log an error; they are never truncated. |
 | `history_query_timeout` | 60 seconds | Maximum wait for each recorder query. Timed-out SQL finishes in the background; no replacement query overlaps it. |
 | `source_attributes` | Unset | Mapping of explicitly configured source entity IDs to attribute names. Unmapped sources keep their default reading. |
@@ -240,7 +242,10 @@ Durations must be positive. In the UI, put these values under **Advanced**.
 A missing, invalid, future or zero-length range makes a history sensor unavailable;
 it does not substitute a current-value average. Source-dependent templates recover
 on a later update when their boundary values become valid. Datetimes without a
-timezone use Home Assistant's configured timezone.
+timezone use Home Assistant's configured timezone. Reversed start/end boundaries
+retain the legacy behavior of swapping the boundaries, with a warning to correct
+the templates. Repeated identical malformed boundaries are logged once until
+valid boundaries return.
 
 ```yaml
 # Last 5 minutes
@@ -290,25 +295,35 @@ optional gap controls apply to history calculations:
 - `ignore_undef: true` can retain an average over valid recorded intervals even when the latest recorded reading is undefined.
 - Adding `calculate_to_now_undef: true` assumes the last valid reading continues through subsequent gaps. Enable this only when that assumption is appropriate for the source.
 
-Neither option invents a reading before the first valid value. If no usable data
-exists, the sensor remains unavailable. Neither option overrides **Require all
-source sensors**.
+The gap controls do not provide new measurements. Legacy history behavior may
+extend the first returned reading backward to the period start when no earlier
+record exists. If Recorder returns no rows for a source, its current reading is
+used as a fallback, including for closed historical periods, and a warning is
+logged. That fallback is not evidence of the source value during the missing
+period. Empty histories are retried on later updates; the warning is suppressed
+until recorded history returns. Neither option overrides **Require every source**.
 
 ## Sensor Attributes
 
 | Attribute | Meaning |
 | --- | --- |
+| `require_all_sources` | Whether strict source availability is configured. |
 | `sources` | Expanded source entity IDs. |
 | `count_sources` | Number of configured sources. |
 | `available_sources` | Sources contributing numeric values to the last calculation. Strict availability also checks current source states. |
-| `count` | Numeric values processed, including history boundary values; not a number of days or elapsed seconds. |
+| `count` | Numeric values processed, including configured undefined-value substitutions and history boundary values; not a number of days or elapsed seconds. |
 | `start` / `end` | Boundaries of the calculated history period, when configured. |
-| `min_value` / `max_value` | Lowest and highest processed values. |
+| `min_value` / `max_value` | Lowest and highest processed values, including configured undefined-value substitutions. |
 | `min_datetime` / `max_datetime` | Times associated with those extrema for a history calculation. |
 | `trending_towards` | Projection to the configured period end if sources keep their last readings. Useful when the end is in the future. |
 
 ## Limitations
 
+- **Groups:** YAML group membership is expanded when an entry is loaded. Reload the Average Sensor entry or its active YAML after changing group membership; existing membership is not tracked dynamically.
+- **Boundary templates:** source-dependent start/end templates are evaluated at history refresh cadence, not immediately on every referenced state change.
+- **Precision:** rounding uses Python's half-even float rounding. Legacy negative precision remains supported and rounds to tens, hundreds and so on; zero precision publishes an integer. Trend attributes use the same precision.
+- **Import notice:** the YAML verification notice is shared across imports. Dismissing it is remembered by Home Assistant, so it may not reappear for each later YAML sensor. Verify new imports independently.
+- **Closed-period cache:** completed periods are cached until relevant source metadata changes or the entry is reloaded. Later recorder backfills or corrections do not automatically invalidate that cache.
 - **History retention:** windows use raw recorder state history. Long-term statistics are not queried automatically. A monthly window needs the relevant raw history retained for that period.
 - **Large windows:** frequently changing sources can produce large queries. A longer update interval reduces frequency, but does not remove the cost of processing a large history. Recorder results are decoded in the recorder executor, and history averaging yields periodically so other Home Assistant callbacks can run during long calculations. A cancelled refresh does not start replacement SQL work for that sensor until its existing query finishes. The configurable maximum window prevents accidental oversized ranges, and a timeout bounds how long the sensor waits. The timeout cannot terminate SQL already running.
 - **Temperature units:** unmapped weather, climate, and water-heater temperatures retain the existing assumption that values use Home Assistant's configured unit. Explicit temperature-attribute selections use reported units when available. Historical unit changes cannot always be reconstructed.

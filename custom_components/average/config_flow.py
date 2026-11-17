@@ -237,8 +237,8 @@ def _yaml_config_to_options(config: dict[str, Any]) -> dict[str, Any]:
         CONF_MAX_HISTORY_PERIOD,
         CONF_HISTORY_QUERY_TIMEOUT,
     ):
-        if value := _duration_to_selector(config.get(key)):
-            options[key] = value
+        if selector_value := _duration_to_selector(config.get(key)):
+            options[key] = selector_value
 
     for key in (CONF_IGNORE_UNDEF, CONF_CALCULATE_TO_NOW_UNDEF):
         if key in config:
@@ -383,7 +383,8 @@ OPTIONS_FLOW = {
 }
 
 
-class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
+# Core registers flows through a dynamic __init_subclass__ domain keyword.
+class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config or options flow for Average Sensor."""
 
     config_flow = CONFIG_FLOW
@@ -518,7 +519,7 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
         ]
         if candidates:
             registry = er.async_get(self.hass)
-            choices = []
+            choices: list[str] = []
             for entry in candidates:
                 entities = [
                     entity

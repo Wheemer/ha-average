@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+from contextlib import suppress
 from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
@@ -117,8 +118,11 @@ async def test_edit_during_blocked_sql_preserves_identity_and_backpressure(  # n
                 assert submit.call_count == 1
         finally:
             release.set()
+            if (pending := created[0]._pending_history_query) is not None:
+                await asyncio.wait_for(asyncio.shield(pending), timeout=3)
             if task is not None:
-                await task
+                with suppress(asyncio.CancelledError):
+                    await task
             await hass.async_block_till_done()
         assert len(created) == 3
         await created[-1].async_update_ha_state(force_refresh=True)
