@@ -3,12 +3,12 @@
 import asyncio
 from datetime import datetime, timedelta
 from functools import partial
+from typing import TYPE_CHECKING
 
 import pytest
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.components.recorder.db_schema import States
 from homeassistant.components.recorder.util import session_scope
-from homeassistant.core import HomeAssistant
 from homeassistant.helpers.recorder import async_initialize_recorder
 from homeassistant.helpers.template import Template
 from homeassistant.setup import async_setup_component
@@ -18,6 +18,9 @@ from sqlalchemy import event, insert, select
 from custom_components.average.sensor import AverageSensor
 
 from .test_attribute_recorder_history import commit_recording
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
 
 
 def _seed_history(
