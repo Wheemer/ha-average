@@ -25,6 +25,8 @@ jobs:
           from pathlib import Path
           version = json.loads(Path('custom_components/average/manifest.json').read_text())['version']
           assert os.environ['RELEASE_TAG'].removeprefix('v') == version, 'Tag and manifest version differ'
+          notes = Path('docs/releases') / (os.environ['RELEASE_TAG'] + '.md')
+          assert notes.is_file() and notes.read_text().strip(), 'Missing curated release notes'
           PY
       - name: Package integration
         working-directory: custom_components/average
@@ -39,4 +41,5 @@ jobs:
           files: |
             ${{ runner.temp }}/average.zip
             ${{ runner.temp }}/average.zip.sha256
-          generate_release_notes: true
+          body_path: docs/releases/${{ github.ref_name }}.md
+          generate_release_notes: false
