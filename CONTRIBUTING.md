@@ -16,7 +16,7 @@ Before submitting a pull request, run:
 
 ```sh
 python scripts/metadata.py --check
-python -m mypy custom_components/average
+python scripts/typecheck.py
 python -m ruff check .
 python -m ruff format . --check
 python -m bandit -r custom_components -c tests/bandit.yaml

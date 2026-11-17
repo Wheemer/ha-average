@@ -42,7 +42,7 @@ jobs:
       - name: Metadata consistency
         run: python scripts/metadata.py --check
       - name: Type checking
-        run: python -m mypy custom_components/average
+        run: python scripts/typecheck.py
       - name: Bandit security scan
         run: python -m bandit -r custom_components -c tests/bandit.yaml --quiet
       - name: Ruff lint

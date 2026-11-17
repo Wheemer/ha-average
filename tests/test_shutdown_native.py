@@ -50,7 +50,7 @@ class ShutdownTests(unittest.IsolatedAsyncioTestCase):
 
         tree = ast.parse(
             textwrap.dedent(
-                inspect.getsource(module.AverageSensor._async_calculate_state)
+                inspect.getsource(module.AverageSensor._async_compute_average)
             )
         )
 
@@ -68,7 +68,7 @@ class ShutdownTests(unittest.IsolatedAsyncioTestCase):
         exec(compile(tree, "unguarded_refresh", "exec"), namespace)
 
         class OldSensor(module.AverageSensor):
-            _async_calculate_state = namespace["_async_calculate_state"]
+            _async_compute_average = namespace["_async_compute_average"]
 
         self.executor.shutdown(wait=True)
 

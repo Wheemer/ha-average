@@ -90,8 +90,10 @@ accessed and no release was published for this follow-up.
   document the SQL-frequency tradeoff instead of silently clamping user settings.
 - **L26:** remove blanket mypy error suppression, correct nullable state/period
   annotations and accumulator typing, and run real type checking in both CI
-  environments. The single narrow call-arg exception documents Core's dynamic
-  flow-registration keyword; unused ignores are errors.
+  environments. The type-check runner resolves Core's editable source tree in
+  native images as well as normal pip installations; no Core APIs are hidden as
+  missing imports, and unused ignores are errors. Rename the refresh worker to
+  avoid overriding Core's internal state-calculation method.
 
 This does not claim that SQL execution can be cancelled. Remaining informational
 observations are documented rather than treated as runtime bugs. No live Home

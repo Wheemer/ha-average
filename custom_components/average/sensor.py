@@ -26,9 +26,10 @@ from asyncio import (
 )
 from contextlib import suppress
 from datetime import datetime, timedelta
+from decimal import Decimal
 from functools import partial
 from hashlib import sha1
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from asyncio import Task
@@ -78,7 +79,9 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.config_validation import PLATFORM_SCHEMA
+from homeassistant.helpers.config_validation import (
+    PLATFORM_SCHEMA as BASE_PLATFORM_SCHEMA,
+)
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.group import expand_entity_ids
 from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
@@ -144,8 +147,12 @@ def _materialized_history(  # noqa: PLR0913
 ) -> dict[str, list[State]]:
     """Query and decode recorder's lazy states entirely in its executor."""
     if uses_attributes:
-        result = history.get_significant_states(
-            hass, start, end, [entity_id], significant_changes_only=False
+        # Default flags request complete State objects, not minimal/compressed dicts.
+        result = cast(
+            "dict[str, list[State]]",
+            history.get_significant_states(
+                hass, start, end, [entity_id], significant_changes_only=False
+            ),
         )
     else:
         result = history.state_changes_during_period(
@@ -213,7 +220,7 @@ def check_period_keys(conf: ConfigType) -> ConfigType:
 
 
 PLATFORM_SCHEMA = vol.All(
-    PLATFORM_SCHEMA.extend(
+    BASE_PLATFORM_SCHEMA.extend(
         {
             vol.Required(CONF_ENTITIES): cv.entity_ids,
             vol.Optional(CONF_REQUIRE_ALL_SOURCES, default=False): cv.boolean,
@@ -369,6 +376,11 @@ async def async_setup_entry(
 class AverageSensor(RestoreSensor):
     """Implementation of an Average sensor."""
 
+    min_datetime: datetime | None
+    max_datetime: datetime | None
+    min_value: int | float | None
+    max_value: int | float | None
+
     _unrecorded_attributes = frozenset(
         {
             ATTR_START,
@@ -416,7 +428,7 @@ class AverageSensor(RestoreSensor):
         self._require_all_sources = config.get(CONF_REQUIRE_ALL_SOURCES, False)
         self._max_source_age = config.get(CONF_MAX_SOURCE_AGE)
         self._update_interval = config.get(CONF_SCAN_INTERVAL, UPDATE_MIN_TIME)
-        self._last_update = None
+        self._last_update: datetime | None = None
         self._update_in_progress = False
         self._initialize_refresh_tracking()
         self._pending_history_query: Future | None = None
@@ -541,7 +553,7 @@ class AverageSensor(RestoreSensor):
 
         # pylint: disable=unused-argument
         @callback
-        async def async_sensor_state_listener(event: Event) -> None:  # noqa: ARG001
+        async def async_sensor_state_listener(event: Event[Any]) -> None:  # noqa: ARG001
             """Handle device state changes."""
             if self._stopping or self.hass.is_stopping:
                 return
@@ -559,7 +571,7 @@ class AverageSensor(RestoreSensor):
 
         # pylint: disable=unused-argument
         @callback
-        async def async_sensor_startup(event: Event) -> None:  # noqa: ARG001
+        async def async_sensor_startup(event: Event[Any]) -> None:  # noqa: ARG001
             """Update template on startup."""
             nonlocal startup_fired, source_unsub
             if self._stopping or self.hass.is_stopping:
@@ -607,6 +619,8 @@ class AverageSensor(RestoreSensor):
         if not self._has_state(str(native_value)):
             return
 
+        if not isinstance(native_value, (str, int, float, Decimal)):
+            return
         try:
             native_value = finite_number(float(native_value))
         except (TypeError, ValueError, OverflowError):
@@ -674,7 +688,7 @@ class AverageSensor(RestoreSensor):
             # Without source metadata, retain the documented HA-unit assumption.
             entity_unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) or ha_unit
 
-        if not self._has_state(temperature):
+        if temperature is None or not self._has_state(temperature):
             return None
 
         try:
@@ -736,20 +750,22 @@ class AverageSensor(RestoreSensor):
         if uses_attributes is None:
             uses_attributes = self._uses_attribute_value(state.entity_id)
         state_dt_changed = state.last_updated if uses_attributes else state.last_changed
-        state = self._get_source_value(state)
-        if not self._has_state(state):
-            state = self._undef
+        raw_value = self._get_source_value(state)
+        if not self._has_state(raw_value):
+            raw_value = self._undef
+        if raw_value is None:
+            return None
 
         try:
-            state = float(state)
+            value = float(raw_value)
         except (TypeError, ValueError):
-            _LOGGER.debug('Ignoring nonnumeric source value "%s"', state)
+            _LOGGER.debug('Ignoring nonnumeric source value "%s"', raw_value)
             return None
-        if not math.isfinite(state):
+        if not math.isfinite(value):
             return None
 
         self.count += 1
-        rstate = round(state, self._precision)
+        rstate = round(value, self._precision)
         if self.min_value is None:
             self.min_value = self.max_value = rstate
             if self._period:
@@ -759,11 +775,11 @@ class AverageSensor(RestoreSensor):
                 self.min_value = rstate
                 if self._period:
                     self.min_datetime = state_dt_changed
-            if rstate > self.max_value:
+            if self.max_value is None or rstate > self.max_value:
                 self.max_value = rstate
                 if self._period:
                     self.max_datetime = state_dt_changed
-        return state
+        return value
 
     def _is_source_stale(self, state: State, now: datetime) -> bool:
         """Return True if a source state is older than the configured age limit."""
@@ -1201,7 +1217,7 @@ class AverageSensor(RestoreSensor):
         if task is not None:
             self._refresh_tasks.add(task)
         try:
-            await self._async_calculate_state()
+            await self._async_compute_average()
         except (Exception, CancelledError):
             self._clear_history_result()
             raise
@@ -1209,7 +1225,7 @@ class AverageSensor(RestoreSensor):
             if task is not None:
                 self._refresh_tasks.discard(task)
 
-    async def _async_calculate_state(self) -> None:  # noqa: PLR0911, PLR0912, PLR0915
+    async def _async_compute_average(self) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         """Update the sensor state."""
         if self._updates_blocked():
             return
@@ -1241,7 +1257,7 @@ class AverageSensor(RestoreSensor):
         now = dt_util.as_utc(now)
         start = dt_util.as_utc(start)
         end = dt_util.as_utc(end)
-        actual_end = dt_util.as_utc(self._actual_end)
+        actual_end = dt_util.as_utc(self._actual_end or end)
         p_start = dt_util.as_utc(p_start)
         p_end = dt_util.as_utc(p_end)
 
@@ -1284,7 +1300,7 @@ class AverageSensor(RestoreSensor):
                 return
             _LOGGER.debug('Processing entity "%s"', entity_id)
 
-            state = self.hass.states.get(entity_id)  # type: State
+            state = self.hass.states.get(entity_id)
 
             if state is None:
                 _LOGGER.debug('Unable to find an entity "%s"', entity_id)
@@ -1496,7 +1512,7 @@ class AverageSensor(RestoreSensor):
         for entity_id in self.sources:
             _LOGGER.debug('Processing entity "%s"', entity_id)
 
-            state = self.hass.states.get(entity_id)  # type: State
+            state = self.hass.states.get(entity_id)
 
             if state is None:
                 _LOGGER.debug('Unable to find an entity "%s"', entity_id)
