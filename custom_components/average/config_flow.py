@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from hashlib import sha1
-from importlib import import_module
-from typing import TYPE_CHECKING, Any, cast, get_type_hints
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.components.input_number import DOMAIN as INPUT_NUMBER_DOMAIN
@@ -34,6 +33,7 @@ from homeassistant.helpers.schema_config_entry_flow import (
 )
 
 from .attributes import normalize_source_attributes
+from .compat import schema_lib
 from .const import (
     CONF_CALCULATE_TO_NOW_UNDEF,
     CONF_DURATION,
@@ -67,12 +67,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
-
-# Use the schema library expected by this Core version's public form API.
-# Newer Core uses probatio; earlier supported Core versions use voluptuous.
-schema_lib = import_module(
-    get_type_hints(section.__init__)["schema"].__module__.split(".", 1)[0]
-)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -237,8 +231,8 @@ def _yaml_config_to_options(config: dict[str, Any]) -> dict[str, Any]:
         CONF_MAX_HISTORY_PERIOD,
         CONF_HISTORY_QUERY_TIMEOUT,
     ):
-        if value := _duration_to_selector(config.get(key)):
-            options[key] = value
+        if selector_value := _duration_to_selector(config.get(key)):
+            options[key] = selector_value
 
     for key in (CONF_IGNORE_UNDEF, CONF_CALCULATE_TO_NOW_UNDEF):
         if key in config:
@@ -274,7 +268,7 @@ def _entry_options(entry: ConfigEntry) -> dict[str, Any]:
 
 
 async def validate_options(
-    _handler: SchemaConfigFlowHandler,
+    _handler: SchemaCommonFlowHandler,
     user_input: dict[str, Any],
 ) -> dict[str, Any]:
     """Validate the form while retaining the flat storage contract."""
@@ -476,8 +470,8 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
                 self._async_update_imported_entry(entry, options)
                 return self.async_abort(reason="already_configured")
 
-        if entry := self._async_entry_for_entity_id(unique_id):
-            self._async_update_imported_entry(entry, options)
+        if adopted_entry := self._async_entry_for_entity_id(unique_id):
+            self._async_update_imported_entry(adopted_entry, options)
             return self.async_abort(reason="already_configured")
 
         return None
@@ -489,7 +483,10 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
         entity_id = registry.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, unique_id)
         if entity_id is None:
             return None
-        owner = registry.async_get(entity_id).config_entry_id
+        registered = registry.async_get(entity_id)
+        if registered is None:
+            return None
+        owner = registered.config_entry_id
         return next(
             (
                 entry
@@ -518,7 +515,7 @@ class AverageConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
         ]
         if candidates:
             registry = er.async_get(self.hass)
-            choices = []
+            choices: list[str] = []
             for entry in candidates:
                 entities = [
                     entity

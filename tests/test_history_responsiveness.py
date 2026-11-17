@@ -85,13 +85,16 @@ async def test_shutdown_during_large_history_stops_without_publishing_result(has
         hass.set_state(CoreState.stopping)
         hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
 
-    asyncio.get_running_loop().call_soon(stop)
     with patch("custom_components.average.sensor.get_instance", return_value=recorder):
-        await sensor._async_update_state()
+        task = asyncio.create_task(sensor._async_update_state())
+        asyncio.get_running_loop().call_soon(stop)
+        await asyncio.gather(task, return_exceptions=True)
     await hass.async_block_till_done()
+    assert task.cancelled()
     assert sensor._stopping
     assert sensor.count < 10000
-    assert sensor.native_value == 99
+    # A cancelled in-flight refresh discards its partial result without publishing.
+    assert sensor.native_value is None
     recorder.async_add_executor_job.assert_awaited_once()
     await sensor.async_will_remove_from_hass()
 

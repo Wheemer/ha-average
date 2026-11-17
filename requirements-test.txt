@@ -2,7 +2,7 @@
 -r requirements-ci.txt
 async-timeout
 colorlog~=6.12
-mypy~=2.4
+mypy==2.4.1
 tzdata
 # pytest, pytest-asyncio and related fixtures are provided by pytest-homeassistant.
 # Keep its compatible versions together instead of overriding individual pins.

@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import voluptuous as vol
 from homeassistant.config import async_hass_config_yaml
 from homeassistant.const import SERVICE_RELOAD
 from homeassistant.exceptions import HomeAssistantError
@@ -26,6 +25,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant, ServiceCall
     from homeassistant.helpers.typing import ConfigType
 
+from .compat import schema_lib
 from .const import DOMAIN, PLATFORMS, STARTUP_MESSAGE
 from .yaml_import import prepare_yaml_import
 
@@ -49,7 +49,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         await async_reload_integration_platforms(hass, DOMAIN, PLATFORMS)
 
     hass.services.async_register(
-        DOMAIN, SERVICE_RELOAD, reload_service_handler, schema=vol.Schema({})
+        DOMAIN, SERVICE_RELOAD, reload_service_handler, schema=schema_lib.Schema({})
     )
 
     return True

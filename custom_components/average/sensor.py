@@ -14,13 +14,25 @@ from __future__ import annotations
 import logging
 import math
 import numbers
-from asyncio import CancelledError, Future, ensure_future, shield, sleep, timeout
+from asyncio import (
+    CancelledError,
+    Future,
+    current_task,
+    ensure_future,
+    shield,
+    sleep,
+    timeout,
+    wait,
+)
 from contextlib import suppress
 from datetime import datetime, timedelta
+from decimal import Decimal
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from hashlib import sha1
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from asyncio import Task
     from collections.abc import Mapping
 
     from homeassistant.config_entries import ConfigEntry
@@ -29,8 +41,6 @@ if TYPE_CHECKING:
         AddEntitiesCallback,
     )
     from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-
-from _sha1 import sha1
 
 import homeassistant.util.dt as dt_util
 import voluptuous as vol
@@ -69,7 +79,9 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.config_validation import PLATFORM_SCHEMA
+from homeassistant.helpers.config_validation import (
+    PLATFORM_SCHEMA as BASE_PLATFORM_SCHEMA,
+)
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.group import expand_entity_ids
 from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
@@ -135,8 +147,12 @@ def _materialized_history(  # noqa: PLR0913
 ) -> dict[str, list[State]]:
     """Query and decode recorder's lazy states entirely in its executor."""
     if uses_attributes:
-        result = history.get_significant_states(
-            hass, start, end, [entity_id], significant_changes_only=False
+        # Default flags request complete State objects, not minimal/compressed dicts.
+        result = cast(
+            "dict[str, list[State]]",
+            history.get_significant_states(
+                hass, start, end, [entity_id], significant_changes_only=False
+            ),
         )
     else:
         result = history.state_changes_during_period(
@@ -204,7 +220,7 @@ def check_period_keys(conf: ConfigType) -> ConfigType:
 
 
 PLATFORM_SCHEMA = vol.All(
-    PLATFORM_SCHEMA.extend(
+    BASE_PLATFORM_SCHEMA.extend(
         {
             vol.Required(CONF_ENTITIES): cv.entity_ids,
             vol.Optional(CONF_REQUIRE_ALL_SOURCES, default=False): cv.boolean,
@@ -272,7 +288,7 @@ def _duration_from_selector(value: Any) -> timedelta | None:
             seconds=value.get("seconds", 0) or 0,
             milliseconds=value.get("milliseconds", 0) or 0,
         )
-    return value
+    return cv.positive_time_period(value)
 
 
 def _entry_unique_id(
@@ -360,6 +376,11 @@ async def async_setup_entry(
 class AverageSensor(RestoreSensor):
     """Implementation of an Average sensor."""
 
+    min_datetime: datetime | None
+    max_datetime: datetime | None
+    min_value: int | float | None
+    max_value: int | float | None
+
     _unrecorded_attributes = frozenset(
         {
             ATTR_START,
@@ -398,7 +419,6 @@ class AverageSensor(RestoreSensor):
         )
         self._history_range_exceeded = False
         self._recorder_unavailable = False
-        self._period = self.start = self.end = None
         self._precision = config.get(CONF_PRECISION, DEFAULT_PRECISION)
         self._undef = _stored_undefined_value(config.get(CONF_PROCESS_UNDEF_AS))
         self._weights = config.get(CONF_WEIGHTS, {})
@@ -408,15 +428,16 @@ class AverageSensor(RestoreSensor):
         self._require_all_sources = config.get(CONF_REQUIRE_ALL_SOURCES, False)
         self._max_source_age = config.get(CONF_MAX_SOURCE_AGE)
         self._update_interval = config.get(CONF_SCAN_INTERVAL, UPDATE_MIN_TIME)
-        self._last_update = None
+        self._last_update: datetime | None = None
         self._update_in_progress = False
+        self._initialize_refresh_tracking()
         self._pending_history_query: Future | None = None
         self._history_complete = False
-        self._last_history_metadata = None
+        self._last_history_metadata: tuple[tuple[Any, ...], ...] | None = None
         self._stopping = False
-        self._temperature_mode = None
+        self._temperature_mode: bool | None = None
         self._temperature_conversion_errors: dict[str, int] = {}
-        self._actual_end = None
+        self._actual_end: datetime | None = None
 
         self.hass = hass
         self._entry_id = entry_id
@@ -424,13 +445,13 @@ class AverageSensor(RestoreSensor):
         self.count_sources = len(self.sources)
         self.available_sources = 0
         self.count = 0
-        self.trending_towards = None
+        self.trending_towards: int | float | None = None
         self.min_value = self.max_value = None
         self.min_datetime = self.max_datetime = None
 
         self._attr_name = config.get(CONF_NAME, DEFAULT_NAME)
-        self._attr_native_value = None
-        self._attr_native_unit_of_measurement = None
+        self._attr_native_value: int | float | None = None
+        self._attr_native_unit_of_measurement: str | None = None
         self._attr_icon = None
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_device_class = None
@@ -440,12 +461,24 @@ class AverageSensor(RestoreSensor):
                 sha1(
                     ";".join(
                         [str(start), str(duration), str(end), ",".join(self.sources)]
-                    ).encode("utf-8")
+                    ).encode("utf-8"),
+                    usedforsecurity=False,
                 ).hexdigest()
             )
             if unique_id == "__legacy__"
             else unique_id
         )
+
+    def _initialize_refresh_tracking(self) -> None:
+        """Initialize task ownership and diagnostic deduplication state."""
+        self._period: tuple[datetime, datetime] | None = None
+        self.start: datetime | None = None
+        self.end: datetime | None = None
+        self._refresh_tasks: set[Task[Any]] = set()
+        self._empty_history_sources: set[str] = set()
+        self._temperature_failure_signatures: dict[str, tuple[str, str]] = {}
+        self._period_boundary_errors: dict[str, str] = {}
+        self._period_was_reversed = False
 
     @property
     def _has_period(self) -> bool:
@@ -472,7 +505,7 @@ class AverageSensor(RestoreSensor):
                 state = self.hass.states.get(entity_id)
                 if state is None or self._is_source_stale(state, now):
                     return False
-                value = self._get_source_value(state)
+                value = self._get_source_value(state, log_errors=False)
                 try:
                     if not math.isfinite(float(value)):
                         return False
@@ -505,6 +538,7 @@ class AverageSensor(RestoreSensor):
             """Latch shutdown through CLOSE and remove the source listener."""
             nonlocal source_unsub
             self._stopping = True
+            self._cancel_refresh_waiters()
             if source_unsub is not None:
                 source_unsub()
                 source_unsub = None
@@ -519,7 +553,7 @@ class AverageSensor(RestoreSensor):
 
         # pylint: disable=unused-argument
         @callback
-        async def async_sensor_state_listener(event: Event) -> None:  # noqa: ARG001
+        async def async_sensor_state_listener(event: Event[Any]) -> None:  # noqa: ARG001
             """Handle device state changes."""
             if self._stopping or self.hass.is_stopping:
                 return
@@ -537,7 +571,7 @@ class AverageSensor(RestoreSensor):
 
         # pylint: disable=unused-argument
         @callback
-        async def async_sensor_startup(event: Event) -> None:  # noqa: ARG001
+        async def async_sensor_startup(event: Event[Any]) -> None:  # noqa: ARG001
             """Update template on startup."""
             nonlocal startup_fired, source_unsub
             if self._stopping or self.hass.is_stopping:
@@ -585,6 +619,8 @@ class AverageSensor(RestoreSensor):
         if not self._has_state(str(native_value)):
             return
 
+        if not isinstance(native_value, (str, int, float, Decimal)):
+            return
         try:
             native_value = finite_number(float(native_value))
         except (TypeError, ValueError, OverflowError):
@@ -613,7 +649,7 @@ class AverageSensor(RestoreSensor):
         self.async_write_ha_state()
 
     @staticmethod
-    def _has_state(state: str | None) -> bool:
+    def _has_state(state: Any) -> bool:
         """Return True if state has any value."""
         return state is not None and state not in [
             STATE_UNKNOWN,
@@ -627,7 +663,9 @@ class AverageSensor(RestoreSensor):
         """Return True if device class is temperature."""
         return device_class == SensorDeviceClass.TEMPERATURE
 
-    def _get_temperature(self, state: State) -> float | None:
+    def _get_temperature(
+        self, state: State, *, log_errors: bool = True
+    ) -> float | None:
         """Get temperature value from entity."""
         ha_unit = self.hass.config.units.temperature_unit
         domain = split_entity_id(state.entity_id)[0]
@@ -650,7 +688,7 @@ class AverageSensor(RestoreSensor):
             # Without source metadata, retain the documented HA-unit assumption.
             entity_unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) or ha_unit
 
-        if not self._has_state(temperature):
+        if temperature is None or not self._has_state(temperature):
             return None
 
         try:
@@ -658,17 +696,26 @@ class AverageSensor(RestoreSensor):
                 float(temperature), entity_unit, ha_unit
             )
         except (HomeAssistantError, TypeError, ValueError):
+            if not log_errors:
+                return None
             failures = self._temperature_conversion_errors.get(state.entity_id, 0) + 1
             self._temperature_conversion_errors[state.entity_id] = failures
-            if failures == 1:
+            signature = (repr(temperature), str(entity_unit))
+            if (
+                failures == 1
+                and self._temperature_failure_signatures.get(state.entity_id)
+                != signature
+            ):
+                self._temperature_failure_signatures[state.entity_id] = signature
                 _LOGGER.exception(
-                    'Could not convert value "%s" to float; further temperature '
-                    "conversion errors for this source are summarized for this "
-                    "calculation",
-                    state,
+                    'Could not convert temperature for "%s"; further conversion '
+                    "errors for this source are summarized for this calculation",
+                    state.entity_id,
                 )
             return None
 
+        if log_errors:
+            self._temperature_failure_signatures.pop(state.entity_id, None)
         return temperature
 
     def _uses_attribute_value(self, entity_id: str) -> bool:
@@ -677,7 +724,7 @@ class AverageSensor(RestoreSensor):
             entity_id
         )[0] in (WEATHER_DOMAIN, CLIMATE_DOMAIN, WATER_HEATER_DOMAIN)
 
-    def _get_source_value(self, state: State) -> Any:
+    def _get_source_value(self, state: State, *, log_errors: bool = True) -> Any:
         """Read a selected attribute, or preserve the default state/temperature path."""
         if not self._has_state(state.state):
             return None
@@ -688,9 +735,13 @@ class AverageSensor(RestoreSensor):
                 "dew_point",
                 "apparent_temperature",
             ):
-                return self._get_temperature(state)
+                return self._get_temperature(state, log_errors=log_errors)
             return state.attributes.get(attribute)
-        return self._get_temperature(state) if self._temperature_mode else state.state
+        return (
+            self._get_temperature(state, log_errors=log_errors)
+            if self._temperature_mode
+            else state.state
+        )
 
     def _get_state_value(
         self, state: State, *, uses_attributes: bool | None = None
@@ -699,20 +750,22 @@ class AverageSensor(RestoreSensor):
         if uses_attributes is None:
             uses_attributes = self._uses_attribute_value(state.entity_id)
         state_dt_changed = state.last_updated if uses_attributes else state.last_changed
-        state = self._get_source_value(state)
-        if not self._has_state(state):
-            return self._undef
+        raw_value = self._get_source_value(state)
+        if not self._has_state(raw_value):
+            raw_value = self._undef
+        if raw_value is None:
+            return None
 
         try:
-            state = float(state)
+            value = float(raw_value)
         except (TypeError, ValueError):
-            _LOGGER.debug('Ignoring nonnumeric source value "%s"', state)
+            _LOGGER.debug('Ignoring nonnumeric source value "%s"', raw_value)
             return None
-        if not math.isfinite(state):
+        if not math.isfinite(value):
             return None
 
         self.count += 1
-        rstate = round(state, self._precision)
+        rstate = round(value, self._precision)
         if self.min_value is None:
             self.min_value = self.max_value = rstate
             if self._period:
@@ -722,11 +775,11 @@ class AverageSensor(RestoreSensor):
                 self.min_value = rstate
                 if self._period:
                     self.min_datetime = state_dt_changed
-            if rstate > self.max_value:
+            if self.max_value is None or rstate > self.max_value:
                 self.max_value = rstate
                 if self._period:
                     self.max_datetime = state_dt_changed
-        return state
+        return value
 
     def _is_source_stale(self, state: State, now: datetime) -> bool:
         """Return True if a source state is older than the configured age limit."""
@@ -785,14 +838,19 @@ class AverageSensor(RestoreSensor):
         self._update_in_progress = True
         try:
             await self._async_update_state()
+        except (Exception, CancelledError):
+            self._clear_history_result()
+            raise
         finally:
             self._update_in_progress = False
 
     @staticmethod
     def handle_template_exception(exc: Exception, field: str) -> None:
         """Log an error nicely if the template cannot be interpreted."""
-        if exc.args and exc.args[0].startswith(
-            "UndefinedError: 'None' has no attribute"
+        if (
+            exc.args
+            and isinstance(exc.args[0], str)
+            and exc.args[0].startswith("UndefinedError: 'None' has no attribute")
         ):
             # Common during HA startup - so just a warning
             _LOGGER.warning(exc)
@@ -800,10 +858,21 @@ class AverageSensor(RestoreSensor):
         else:
             _LOGGER.error('Error parsing template for field "%s": %s', field, exc)
 
+    def _report_period_boundary_error(self, value: Any, field: str) -> None:
+        """Log once per invalid output until a valid boundary is observed."""
+        signature = repr(value)
+        if self._period_boundary_errors.get(field) != signature:
+            self._period_boundary_errors[field] = signature
+            _LOGGER.error(
+                'Parsing error: field "%s" must be a datetime or a timestamp, '
+                "not a boolean or malformed value",
+                field,
+            )
+
     def _parse_period_boundary(self, value: Any, field: str) -> datetime | None:
         """Parse a boundary without raising on sources missing during startup."""
         if isinstance(value, bool):
-            _LOGGER.error('Period boundary "%s" must not be a boolean', field)
+            self._report_period_boundary_error(value, field)
             return None
         if not self._has_state(value):
             _LOGGER.debug('Period boundary "%s" is not available yet', field)
@@ -815,10 +884,9 @@ class AverageSensor(RestoreSensor):
             with suppress(TypeError, ValueError, OverflowError, OSError):
                 parsed = dt_util.utc_from_timestamp(float(value))
         if parsed is None:
-            _LOGGER.error(
-                'Parsing error: field "%s" must be a datetime or a timestamp', field
-            )
+            self._report_period_boundary_error(value, field)
             return None
+        self._period_boundary_errors.pop(field, None)
         if parsed.tzinfo is None:
             parsed = parsed.replace(
                 tzinfo=dt_util.get_time_zone(self.hass.config.time_zone)
@@ -833,7 +901,7 @@ class AverageSensor(RestoreSensor):
 
         # Parse start
         if self._start_template is not None:
-            _LOGGER.debug("Process start template: %s", self._start_template)
+            _LOGGER.debug("Processing start time template")
             try:
                 start_rendered = self._start_template.async_render()
             except (TemplateError, TypeError) as ex:
@@ -845,7 +913,7 @@ class AverageSensor(RestoreSensor):
 
         # Parse end
         if self._end_template is not None:
-            _LOGGER.debug("Process end template: %s", self._end_template)
+            _LOGGER.debug("Processing end time template")
             try:
                 end_rendered = self._end_template.async_render()
             except (TemplateError, TypeError) as ex:
@@ -870,7 +938,16 @@ class AverageSensor(RestoreSensor):
             return
 
         if start > end:
+            if not self._period_was_reversed:
+                _LOGGER.warning(
+                    'Start/end boundaries for "%s" are reversed; retaining '
+                    "legacy boundary swapping. Correct the YAML/UI templates",
+                    self.name,
+                )
+            self._period_was_reversed = True
             start, end = end, start
+        else:
+            self._period_was_reversed = False
 
         self._actual_end = end
 
@@ -1115,7 +1192,40 @@ class AverageSensor(RestoreSensor):
         self._last_history_metadata = None
         self._last_update = None
 
-    async def _async_update_state(self) -> None:  # noqa: PLR0911, PLR0912, PLR0915
+    def _cancel_refresh_waiters(self) -> set[Task[Any]]:
+        """Release our refresh tasks on STOP/unload while SQL keeps its guard."""
+        tasks = {
+            task
+            for task in self._refresh_tasks
+            if not task.done() and task is not current_task()
+        }
+        for task in tasks:
+            task.cancel()
+        return tasks
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel refresh waiters on unload without cancelling their SQL jobs."""
+        self._stopping = True
+        tasks = self._cancel_refresh_waiters()
+        if tasks:
+            await wait(tasks, timeout=1)
+        await super().async_will_remove_from_hass()
+
+    async def _async_update_state(self) -> None:
+        """Track refresh ownership and discard partial data on every failure."""
+        task = current_task()
+        if task is not None:
+            self._refresh_tasks.add(task)
+        try:
+            await self._async_compute_average()
+        except (Exception, CancelledError):
+            self._clear_history_result()
+            raise
+        finally:
+            if task is not None:
+                self._refresh_tasks.discard(task)
+
+    async def _async_compute_average(self) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         """Update the sensor state."""
         if self._updates_blocked():
             return
@@ -1147,7 +1257,7 @@ class AverageSensor(RestoreSensor):
         now = dt_util.as_utc(now)
         start = dt_util.as_utc(start)
         end = dt_util.as_utc(end)
-        actual_end = dt_util.as_utc(self._actual_end)
+        actual_end = dt_util.as_utc(self._actual_end or end)
         p_start = dt_util.as_utc(p_start)
         p_end = dt_util.as_utc(p_end)
 
@@ -1179,8 +1289,8 @@ class AverageSensor(RestoreSensor):
         self.min_datetime = self.max_datetime = None
         self.trending_towards = None
         #
-        values = []
-        last_values = []
+        values: list[tuple[float, float]] = []
+        last_values: list[tuple[float, float]] = []
         history_complete = True
 
         # pylint: disable=too-many-nested-blocks
@@ -1190,7 +1300,7 @@ class AverageSensor(RestoreSensor):
                 return
             _LOGGER.debug('Processing entity "%s"', entity_id)
 
-            state = self.hass.states.get(entity_id)  # type: State
+            state = self.hass.states.get(entity_id)
 
             if state is None:
                 _LOGGER.debug('Unable to find an entity "%s"', entity_id)
@@ -1200,8 +1310,8 @@ class AverageSensor(RestoreSensor):
                 history_complete = False
                 continue
 
-            value = 0
-            elapsed = 0
+            value: float | None = 0.0
+            elapsed = 0.0
             trending_last_state = None
 
             # Get history between start and now
@@ -1222,15 +1332,20 @@ class AverageSensor(RestoreSensor):
             ):
                 history_complete = False
                 value = self._get_state_value(state)
-                _LOGGER.warning(
-                    'Historical data not found for entity "%s". Current state used: %s',
-                    entity_id,
-                    value,
-                )
+                if entity_id not in self._empty_history_sources:
+                    _LOGGER.warning(
+                        'Historical data not found for entity "%s". '
+                        "Current state used: %s",
+                        entity_id,
+                        value,
+                    )
+                self._empty_history_sources.add(entity_id)
             else:
+                self._empty_history_sources.discard(entity_id)
+                integral = 0.0
                 # Get the first state
                 item = history_list[entity_id][0]
-                _LOGGER.debug("Initial historical state: %s", item)
+                _LOGGER.debug("Initial historical record for %s", entity_id)
                 last_state = None
                 last_time = start_ts
                 if item is not None and self._has_state(item.state):
@@ -1245,17 +1360,18 @@ class AverageSensor(RestoreSensor):
                         await sleep(0)
                         if self._stopping or self.hass.is_stopping:
                             return
-                    _LOGGER.debug("Historical state: %s", item)
+                    _LOGGER.debug("Historical record for %s", entity_id)
                     current_state = self._get_state_value(
                         item, uses_attributes=uses_attributes
                     )
                     current_time = (
                         item.last_updated if uses_attributes else item.last_changed
                     ).timestamp()
+                    current_time = min(end_ts, max(start_ts, current_time))
 
                     if last_state is not None:
                         last_elapsed = current_time - last_time
-                        value += last_state * last_elapsed
+                        integral += last_state * last_elapsed
                         elapsed += last_elapsed
 
                     if current_state is not None or not self._calculate_to_now_undef:
@@ -1265,13 +1381,15 @@ class AverageSensor(RestoreSensor):
                 # Count time elapsed between last history state and now
                 if last_state is None:
                     value = (
-                        value / elapsed if self._ignore_undef and elapsed > 0 else None
+                        integral / elapsed
+                        if self._ignore_undef and elapsed > 0
+                        else None
                     )
                 else:
                     last_elapsed = end_ts - last_time
-                    value += last_state * last_elapsed
+                    integral += last_state * last_elapsed
                     elapsed += last_elapsed
-                    value = value / elapsed if elapsed > 0 else None
+                    value = integral / elapsed if elapsed > 0 else None
                     trending_last_state = last_state
 
                 _LOGGER.debug("Historical average state: %s", value)
@@ -1307,7 +1425,7 @@ class AverageSensor(RestoreSensor):
             )
             to_now = self._attr_native_value * part_of_period
             to_end = current_average * (1 - part_of_period)
-            self.trending_towards = to_now + to_end
+            self.trending_towards = self._weighted_average([(to_now + to_end, 1)])
 
         _LOGGER.debug(
             "Total average state: %s %s",
@@ -1322,7 +1440,7 @@ class AverageSensor(RestoreSensor):
 
     def _history_metadata_signature(self) -> tuple[tuple[Any, ...], ...]:
         """Detect source metadata and freshness changes before reusing history."""
-        signature = [(self.hass.config.units.temperature_unit,)]
+        signature: list[tuple[Any, ...]] = [(self.hass.config.units.temperature_unit,)]
         now = dt_util.utcnow()
         keys = (
             ATTR_DEVICE_CLASS,
@@ -1383,7 +1501,7 @@ class AverageSensor(RestoreSensor):
         self._temperature_conversion_errors.clear()
         self._prepare_source_mode()
         self.available_sources = 0
-        values = []
+        values: list[tuple[float, float]] = []
         self.count = 0
         self.min_value = self.max_value = None
         self.min_datetime = self.max_datetime = None
@@ -1394,7 +1512,7 @@ class AverageSensor(RestoreSensor):
         for entity_id in self.sources:
             _LOGGER.debug('Processing entity "%s"', entity_id)
 
-            state = self.hass.states.get(entity_id)  # type: State
+            state = self.hass.states.get(entity_id)
 
             if state is None:
                 _LOGGER.debug('Unable to find an entity "%s"', entity_id)
@@ -1411,6 +1529,7 @@ class AverageSensor(RestoreSensor):
                 self.available_sources += 1
 
         self._attr_native_value = self._weighted_average(values)
+        self._log_temperature_conversion_errors()
 
         _LOGGER.debug(
             "Total average state: %s %s",

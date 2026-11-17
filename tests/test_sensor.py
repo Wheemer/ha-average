@@ -288,7 +288,8 @@ async def test__get_state_value(default_sensor):
         {ATTR_UNIT_OF_MEASUREMENT: None},
         dt_util.now(),
     )
-    assert default_sensor._get_state_value(state) == "Undef"
+    # A corrupt stored substitute must never become a published reading.
+    assert default_sensor._get_state_value(state) is None
 
     state = State(
         "sensor.test",

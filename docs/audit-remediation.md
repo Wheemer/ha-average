@@ -53,3 +53,48 @@ cancellation, and this patch does not claim that timed-out database work stops.
 
 Other low/informational findings remain pending verification. No live system was
 accessed and no release was published for this follow-up.
+
+
+## Calculation and lifecycle follow-up
+
+- **L2/L6:** undefined substitutions now contribute to diagnostic count/extrema;
+  projected trends use the configured precision, including legacy negative values.
+- **L9/L10/L11:** tracked refresh waiters are cancelled and awaited for at most one
+  second during unload. Running SQL remains shielded and registered across
+  replacement entities. Failed/cancelled refreshes clear partial diagnostics and
+  stale values; a failed attempt does not consume the retry throttle window.
+  STOP also cancels the integration's refresh waiters without cancelling SQL.
+- **L7/L12/L13/L17/L18/L29:** availability checks do not emit conversion errors or
+  mutate their budgets; both calculation modes report conversion summaries.
+  Repeated identical current-value conversion tracebacks are suppressed until
+  data/units change or the source recovers. Full
+  State objects are absent from history/conversion logs. Missing-history and
+  malformed-boundary warnings are deduplicated while retries continue. Template
+  error handling accepts non-string exception arguments. Scalar legacy duration
+  formats are normalized and malformed formats fail before polling arithmetic.
+- **L4:** reversed boundaries retain the documented legacy swap with a warning.
+- **L3/L15/L16/L20/L22:** document the existing no-history/backfill behavior,
+  reload requirement for changed group membership, template refresh cadence,
+  negative precision and shared import-notice dismissal semantics.
+- **L5 verification:** retain the strict source-count guard. A recovered live
+  source has not yet contributed to a previously partial history average; making
+  that result available before recalculation would weaken strict availability.
+- **L27:** enforce measured coverage >=93% and strict markers in the full CI
+  matrix, while keeping local focused tests usable without a full-suite floor.
+- **I4/I16:** clamp weighting timestamps to the requested interval and use public
+  hashlib SHA-1 with usedforsecurity=False for legacy identity hashes. Existing
+  golden identity and real Recorder regression tests remain unchanged in result.
+
+- **L30 verification:** keep positive scan intervals configurable in YAML/UI.
+  A forced 20-second floor would reject existing intentional configurations;
+  document the SQL-frequency tradeoff instead of silently clamping user settings.
+- **L26:** remove blanket mypy error suppression, correct nullable state/period
+  annotations and accumulator typing, and run real type checking in both CI
+  environments. The type-check runner resolves Core's editable source tree in
+  native images as well as normal pip installations; no Core APIs are hidden as
+  missing imports, and unused ignores are errors. Rename the refresh worker to
+  avoid overriding Core's internal state-calculation method.
+
+This does not claim that SQL execution can be cancelled. Remaining informational
+observations are documented rather than treated as runtime bugs. No live Home
+Assistant was accessed and no release was published.

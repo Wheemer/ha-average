@@ -4,6 +4,9 @@ While tests aren't required to publish a custom component for Home Assistant, th
 
 # Getting Started
 
+Clone the Git repository for development. Generated GitHub source archives omit
+tests and development dotfiles; `average.zip` is for installation only.
+
 To begin, it is recommended to create a virtual environment and install all necessary dependencies:
 ```bash
 ./scripts/setup
@@ -58,3 +61,14 @@ HACS validates the fork's metadata, topics, issues and packaging. Its license
 identification check has an explicit exception because GitHub reports the
 inherited CC-BY-NC-SA-4.0 text as `NOASSERTION`, including in the upstream
 repository. `LICENSE.md` and its attribution/terms are unchanged.
+
+
+## Coverage
+
+The full CI suite measures coverage and requires at least 93%, with strict pytest
+marker validation. Local focused tests remain usable without a full-suite
+coverage requirement. To reproduce the CI coverage gate, run:
+
+```sh
+python -m pytest -n 2 --dist=loadfile --strict-markers --cov=custom_components --cov-report=term --cov-fail-under=93
+```

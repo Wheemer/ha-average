@@ -90,8 +90,8 @@ async def test_large_bad_history_bounds_logging_and_recovers(
         assert sensor.available
         assert sensor.native_unit_of_measurement == "°C"
         assert sensor.unique_id == "stable_errors"
-        # The error budget resets on the next real calculation, rather than
-        # hiding persistent problems for the entity's entire lifetime.
+        # Valid rows reset the signature, so the next independently failing
+        # interval is reported instead of being hidden after recovery.
         sensor._period = None
         await sensor._async_update_state()
         assert len(conversion_errors()) == 4
