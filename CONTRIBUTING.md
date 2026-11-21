@@ -28,6 +28,14 @@ and require Docker. Tests use temporary instances and synthetic data; do not
 connect them to a live Home Assistant installation. Preserve YAML compatibility,
 UI configuration, entity IDs and unique IDs when fixing existing behavior.
 
+Update the Home Assistant requirement, the matching `pytest-homeassistant`
+fixture pin, and the digest-pinned test image together. The fixture package pins
+an exact Core version, so independently updating those requirements can make
+the test environment impossible to install. Dependabot groups Python and test
+image updates into one weekly `test-stack` PR; GitHub Actions updates remain a
+separate weekly group. Both fixture and newer-plugin checks must pass before
+merging. Dependency maintenance does not authorize a live installation or release.
+
 ## Metadata and releases
 
 `custom_components/average/manifest.json` is authoritative for the integration

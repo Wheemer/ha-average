@@ -75,15 +75,30 @@ async def test_detached_query_failure_is_logged_and_allows_recovery(hass, caplog
     started = asyncio.Event()
     release = threading.Event()
     loop = asyncio.get_running_loop()
+    expected_error = RuntimeError("late SQL failure")
+    reported_errors = []
+    original_handler = loop.call_exception_handler
+
+    def expected_shield_failure(context) -> None:
+        # Python 3.14 can report the injected exception from a cancelled shield
+        # even though the sensor retrieves and logs the underlying query error.
+        if context.get("exception") is expected_error and context.get(
+            "message", ""
+        ).endswith("exception in shielded future"):
+            reported_errors.append(context)
+            return
+        original_handler(context)
 
     def fail(*args: object, **kwargs: object) -> None:
         loop.call_soon_threadsafe(started.set)
         assert release.wait(timeout=5)
-        message = "late SQL failure"
-        raise RuntimeError(message)
+        raise expected_error
 
     recorder = Mock(async_add_executor_job=hass.async_add_executor_job)
     with (
+        patch.object(
+            loop, "call_exception_handler", side_effect=expected_shield_failure
+        ),
         patch("custom_components.average.sensor.get_instance", return_value=recorder),
         patch(
             "custom_components.average.sensor.history.state_changes_during_period",
@@ -104,6 +119,7 @@ async def test_detached_query_failure_is_logged_and_allows_recovery(hass, caplog
             await asyncio.sleep(0)
             await hass.async_block_till_done()
     assert "late SQL failure" in caplog.text
+    assert len(reported_errors) <= 1
     assert sensor._pending_history_query is None
     recorder.async_add_executor_job = Mock(side_effect=hass.async_add_executor_job)
     with (
