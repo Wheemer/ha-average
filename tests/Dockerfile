@@ -1,4 +1,4 @@
-FROM ghcr.io/home-assistant/home-assistant:2026.11.2@sha256:493a07e8f6530fc640223f4a0a5248f20a61ca2f718bb1d31efbf08a2c5ea28f
+FROM ghcr.io/home-assistant/home-assistant:2026.11.3@sha256:24e541ddae5818bf8eb27898b9ba00d0c344a655aa5097e9e9bd4b19356be847
 COPY requirements*.txt /tmp/
 # Fixture releases can pin an earlier patch. Restore the exact Core version
 # shipped by the base image after installing the test-only dependencies.
