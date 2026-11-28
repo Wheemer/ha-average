@@ -1,5 +1,5 @@
 # Keep the Core-maintained fixture version aligned with our tested Core series.
-pytest-homeassistant==2026.11.2
+pytest-homeassistant==2026.11.3
 pytest-cov>=7.1.0
-ruff==0.17.5
+ruff==0.17.6
 bandit==1.9.4
